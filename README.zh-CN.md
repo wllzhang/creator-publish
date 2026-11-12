@@ -26,16 +26,16 @@ skills-manager-cli skills deploy creator-publish --agent cursor
 node runtime/run.mjs --platform <id> ...
 ```
 
-| 平台 | 方式 | 默认模式 |
-|---|---|---|
-| `douyin` | Ego 浏览器 | draft（草稿） |
-| `bilibili` | Ego 浏览器 | draft（草稿） |
-| `weixin_channels` | Ego 浏览器 | draft（草稿） |
-| `xiaohongshu` | Ego 浏览器 | draft（草稿） |
-| `fanqie_short` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） |
-| `ximalaya_audio` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） |
-| `kdp_ebook` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） |
-| `wechat_mp` | 公众号官方 API（Node） | draft（草稿） |
+| 平台 | 方式 | 默认模式 | 调用示例 |
+|---|---|---|---|
+| `douyin` | Ego 浏览器 | draft（草稿） | `node runtime/run.mjs --platform douyin --profile-id "Profile 2" --video "C:\abs\video.mp4" --title "标题" --topics "a,b"` |
+| `bilibili` | Ego 浏览器 | draft（草稿） | `node runtime/run.mjs --platform bilibili --profile-id "Profile 2" --video "C:\abs\video.mp4" --title "标题" --topics "a,b"` |
+| `weixin_channels` | Ego 浏览器 | draft（草稿） | `node runtime/run.mjs --platform weixin_channels --profile-id "Profile 2" --video "C:\abs\视频.mp4" --title "短标题" --body "描述"` |
+| `xiaohongshu` | Ego 浏览器 | draft（草稿） | `node runtime/run.mjs --platform xiaohongshu --profile-id "Profile 2" --images "C:\a.jpg,C:\b.jpg" --title "标题" --body "文案"` |
+| `fanqie_short` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） | `node runtime/run.mjs --platform fanqie_short --profile-id "Profile 2" --title "书名" --body-file "C:\abs\body.md" --cover "C:\abs\cover.png"` |
+| `ximalaya_audio` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） | `node runtime/run.mjs --platform ximalaya_audio --profile-id "Profile 2" --album-id "123" --title "标题" --mp3 "C:\abs\a.mp3" --intro-file "C:\abs\intro.txt"` |
+| `kdp_ebook` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） | `node runtime/run.mjs --platform kdp_ebook --profile-id "Profile 2" --epub "C:\abs\book.epub" --cover "C:\abs\cover.jpg" --title "Title"` |
+| `wechat_mp` | 公众号官方 API（Node） | draft（草稿） | `node runtime/run.mjs --platform wechat_mp --api-env "C:\abs\wechat_mp.env" --title "标题" --html-file "C:\abs\article.html" --cover "C:\abs\cover.jpg"` |
 
 字段说明见 [`platforms/`](platforms/)，运行示例见 [`runtime/README.md`](runtime/README.md)。
 
