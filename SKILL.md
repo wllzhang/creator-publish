@@ -26,7 +26,9 @@ Fields per platform: [`platforms/`](platforms/). Summary:
 
 | platform | fields |
 |---|---|
-| douyin / bilibili / weixin_channels | `video`, `title`, optional `topics`, `cover`, `body` |
+| douyin | `video`, `title`, optional `topics`, `cover`, `body` |
+| bilibili | `video`, `title`, optional `topics`, `cover`, `body` |
+| weixin_channels | `video`, `title`, optional `topics`, `cover`, `body` |
 | xiaohongshu | `images` (file list), `title`, optional `body`/`body-file`, `topics` |
 | wechat_mp | `api-env`, `title`, `html`/`html-file`, `cover`, optional `body-images`; egress 从 `--egress` / env / api-env（含已有 `WECHAT_MP_EGRESS_IP`）解析，不走 VPN |
 | fanqie_short | `title`, `body`/`body-file`, `cover`, optional `category` |

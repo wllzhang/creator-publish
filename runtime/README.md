@@ -10,8 +10,13 @@ node runtime/run.mjs --platform <id> ...
 
 | platform | 说明 |
 |---|---|
-| `douyin` / `bilibili` / `weixin_channels` / `xiaohongshu` | write_job + Ego |
-| `fanqie_short` / `ximalaya_audio` / `kdp_ebook` | novel 适配器 |
+| `douyin` | write_job + Ego |
+| `bilibili` | write_job + Ego |
+| `weixin_channels` | write_job + Ego |
+| `xiaohongshu` | write_job + Ego |
+| `fanqie_short` | novel 适配器 |
+| `ximalaya_audio` | novel 适配器 |
+| `kdp_ebook` | novel 适配器 |
 | `wechat_mp` | 官方 API（SSH 出口 / local） |
 
 ### 社媒示例

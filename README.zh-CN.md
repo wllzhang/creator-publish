@@ -28,8 +28,13 @@ node runtime/run.mjs --platform <id> ...
 
 | 平台 | 方式 | 默认模式 |
 |---|---|---|
-| `douyin` / `bilibili` / `weixin_channels` / `xiaohongshu` | Ego 浏览器 | draft（草稿） |
-| `fanqie_short` / `ximalaya_audio` / `kdp_ebook` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） |
+| `douyin` | Ego 浏览器 | draft（草稿） |
+| `bilibili` | Ego 浏览器 | draft（草稿） |
+| `weixin_channels` | Ego 浏览器 | draft（草稿） |
+| `xiaohongshu` | Ego 浏览器 | draft（草稿） |
+| `fanqie_short` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） |
+| `ximalaya_audio` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） |
+| `kdp_ebook` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） |
 | `wechat_mp` | 公众号官方 API（Node） | draft（草稿） |
 
 字段说明见 [`platforms/`](platforms/)，运行示例见 [`runtime/README.md`](runtime/README.md)。

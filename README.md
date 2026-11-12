@@ -28,8 +28,13 @@ node runtime/run.mjs --platform <id> ...
 
 | Platform | Via | Default mode |
 |---|---|---|
-| `douyin` / `bilibili` / `weixin_channels` / `xiaohongshu` | Ego browser | draft |
-| `fanqie_short` / `ximalaya_audio` / `kdp_ebook` | Ego browser | submit (omit `--submit` for draft) |
+| `douyin` | Ego browser | draft |
+| `bilibili` | Ego browser | draft |
+| `weixin_channels` | Ego browser | draft |
+| `xiaohongshu` | Ego browser | draft |
+| `fanqie_short` | Ego browser | submit (omit `--submit` for draft) |
+| `ximalaya_audio` | Ego browser | submit (omit `--submit` for draft) |
+| `kdp_ebook` | Ego browser | submit (omit `--submit` for draft) |
 | `wechat_mp` | Official API (Node) | draft |
 
 See [`platforms/`](platforms/) for required fields and [`runtime/README.md`](runtime/README.md) for examples.
