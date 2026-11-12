@@ -2,19 +2,18 @@
  * B站存草稿。job: profileId, video, title, topics[], cover?, shotDir?
  */
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { humanPause } from '../lib/pace.mjs';
 import { loadJob, abs } from '../lib/load_job.mjs';
+import { resolveShotDir, safeShot, normalizeTopics } from '../lib/ego_dom.mjs';
 
 const { job } = loadJob();
 const videoPath = abs(job.video);
 const coverPath = job.cover ? abs(job.cover) : null;
 const title = job.title;
-const tags = Array.isArray(job.topics) ? job.topics : [];
-const shotDir = job.shotDir ? abs(job.shotDir) : path.join(os.tmpdir(), 'creator-publish-shots');
+const tags = normalizeTopics(job.topics);
+const shotDir = resolveShotDir(job);
 if (!videoPath || !title) throw new Error('job 需要 video + title');
-fs.mkdirSync(shotDir, { recursive: true });
 
 const task = await taskSpace('cp-bili-' + Date.now(), { profileId: job.profileId });
 const page = task.page('p1');
@@ -130,7 +129,7 @@ try {
     }
   }
 
-  await page.screenshot({ path: `${shotDir}/bili_before_draft.png` });
+  await safeShot(page, `${shotDir}/bili_before_draft.png`);
   await humanPause(2500, 4500, '点存草稿前', 'bili');
   const clickedDraft = await page.evaluate(() => {
     const labels = new Set(['存草稿', '保存草稿', '保存为草稿']);
@@ -203,7 +202,7 @@ try {
       break;
     }
   }
-  await page.screenshot({ path: `${shotDir}/bili_after_draft.png` });
+  await safeShot(page, `${shotDir}/bili_after_draft.png`);
   console.log(saved ? 'BILIBILI_DRAFT_DONE' : 'BILIBILI_DRAFT_UNCONFIRMED_CHECK_MANAGER');
   console.log('spaceId', task.spaceId);
 } finally {
