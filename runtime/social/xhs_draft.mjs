@@ -8,11 +8,31 @@ const { job } = loadJob();
 const images = (job.images || []).map((p) => abs(p)).filter(Boolean);
 const title = (job.title || '').slice(0, 20);
 let desc = job.body || '';
-if (!desc && Array.isArray(job.topics) && job.topics.length) {
-  desc = `<p>${job.topics.map((t) => (String(t).startsWith('#') ? t : '#' + t)).join(' ')}</p>`;
+const rawTopics = Array.isArray(job.topics) ? job.topics : [];
+const topicsList = rawTopics
+  .map((t) => String(t).trim().replace(/^#/, ''))
+  .filter(Boolean);
+
+const topicTagsText = topicsList.map((t) => `#${t}`).join(' ');
+if (topicTagsText) {
+  if (desc) {
+    desc = `${desc}\n\n${topicTagsText}`;
+  } else {
+    desc = topicTagsText;
+  }
 }
-if (!desc) desc = '<p></p>';
-else if (!desc.includes('<')) desc = `<p>${desc}</p>`;
+
+let descHtml = '';
+if (!desc) {
+  descHtml = '<p></p>';
+} else if (desc.includes('<')) {
+  descHtml = desc;
+} else {
+  descHtml = desc
+    .split(/\r?\n\r?\n/)
+    .map((block) => `<p>${block.replace(/\r?\n/g, '<br>')}</p>`)
+    .join('');
+}
 
 if (!images.length) throw new Error('job 需要 images[]（绝对路径列表）');
 if (!title) throw new Error('job 需要 title');
@@ -76,7 +96,7 @@ try {
       editor.innerHTML = dHtml;
       editor.dispatchEvent(new Event('input', { bubbles: true }));
     }
-  }, desc);
+  }, descHtml);
   await humanPause(5000, 9000, '正文后', 'xhs');
 
   await humanPause(3000, 6000, '点暂存前', 'xhs');
