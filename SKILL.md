@@ -41,7 +41,7 @@ Fields per platform: [`platforms/`](platforms/). Summary:
 |---|---|
 | [`platforms/`](platforms/) | Capability + required inputs per platform |
 | [`runtime/run.mjs`](runtime/run.mjs) | **Unified entry** for all platforms |
-| [`runtime/`](runtime/) | Ego / WeChat adapters (also callable directly) |
+| [`runtime/`](runtime/) | Ego / WeChat adapters (invoked by `run.mjs`) |
 
 ## Agent flow
 

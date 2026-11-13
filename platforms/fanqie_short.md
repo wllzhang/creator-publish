@@ -21,7 +21,7 @@ allowed_modes: [draft, submit]
 ## run
 
 ```text
-node runtime/novel/fanqie_publish.mjs \
+node runtime/run.mjs --platform fanqie_short \
   --profile-id <id> \
   --title "..." \
   --body-file C:/abs/body.md \

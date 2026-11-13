@@ -51,8 +51,3 @@ node runtime/run.mjs --platform wechat_mp `
 ```
 
 **不走本地 VPN。** 出口解析：`--egress` → env `WECHAT_MP_EGRESS` → api-env `WECHAT_MP_EGRESS` / `EGRESS_SSH` → 有 `WECHAT_MP_EGRESS_IP` 则 SSH（须同时配置 SSH 主机）→ 否则 `local`。
-
-## 兼容入口
-
-- `runtime/run_social.mjs` → 转发到 `run.mjs`（仅社媒）
-- `runtime/novel/*_publish.mjs`、`runtime/wechat/wechat_mp_draft.mjs` 仍可直调

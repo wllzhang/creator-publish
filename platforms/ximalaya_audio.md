@@ -23,7 +23,7 @@ allowed_modes: [draft, submit]
 ## run
 
 ```text
-node runtime/novel/ximalaya_publish.mjs \
+node runtime/run.mjs --platform ximalaya_audio \
   --profile-id <id> \
   --album-id 123 \
   --title "..." \

@@ -25,7 +25,7 @@ allowed_modes: [draft, submit]
 ## run
 
 ```text
-node runtime/novel/kdp_publish.mjs \
+node runtime/run.mjs --platform kdp_ebook \
   --profile-id <id> \
   --epub C:/abs/book.epub \
   --cover C:/abs/cover.jpg \
