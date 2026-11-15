@@ -479,7 +479,13 @@ try {
       });
       await humanPause(1200, 2200);
       const clickedUploadTab = await page.evaluate(() => {
-        const modal = document.querySelector('.bcc-dialog, [class*="cover"], [class*="modal"]');
+        const modals = Array.from(
+          document.querySelectorAll('.bcc-dialog, [class*="dialog"], [class*="modal"], [role="dialog"]'),
+        ).filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 300 && r.height > 200 && /封面制作|上传封面/.test(el.innerText || '');
+        });
+        const modal = modals[modals.length - 1];
         if (!modal) return false;
         const tab = Array.from(modal.querySelectorAll('div, span, button, a')).find(
           (el) =>
@@ -497,11 +503,17 @@ try {
         await humanPause(600, 1000);
       }
       const coverInputReady = await page.evaluate(() => {
-        const dialog = document.querySelector('.bcc-dialog, [class*="cover"], [class*="crop"], [class*="modal"]');
+        const modals = Array.from(
+          document.querySelectorAll('.bcc-dialog, [class*="dialog"], [class*="modal"], [role="dialog"]'),
+        ).filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 300 && r.height > 200 && /封面制作|上传封面/.test(el.innerText || '');
+        });
+        const dialog = modals[modals.length - 1];
         const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter((inp) =>
           /(image|png|jpg|jpeg|webp)/i.test(inp.accept || ''),
         );
-        const inp = dialog?.querySelector('input[type="file"]') || inputs[0];
+        const inp = dialog?.querySelector('input[type="file"]') || inputs[inputs.length - 1] || inputs[0];
         if (!inp) return false;
         inp.id = 'bili-cover-upload-target';
         return true;
@@ -509,17 +521,65 @@ try {
       if (coverInputReady) {
         await page.setInputFiles('#bili-cover-upload-target', effectiveCover);
         await humanPause(2500, 4000, '封面上传', 'bili');
-        await page.evaluate(() => {
-          const dialog = document.querySelector('.bcc-dialog, [class*="cover"], [class*="modal"]') || document;
+
+        const confirmBtn = await page.evaluate(() => {
+          const modals = Array.from(
+            document.querySelectorAll('.bcc-dialog, [class*="dialog"], [class*="modal"], [role="dialog"]'),
+          ).filter((el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 300 && r.height > 200 && /封面制作/.test(el.innerText || '');
+          });
+          const modal = modals[modals.length - 1] || document;
+          const btns = Array.from(modal.querySelectorAll('button, [role="button"], span, div')).filter((b) => {
+            const r = b.getBoundingClientRect();
+            return r.width > 20 && r.height > 16;
+          });
           const okBtn =
-            Array.from(dialog.querySelectorAll('button, [role="button"], span')).find(
-              (b) =>
-                /^(完成|确定|确认)$/.test((b.innerText || '').replace(/\s+/g, '').trim()) &&
-                b.getBoundingClientRect().width > 0,
-            ) || dialog.querySelector('button.bcc-button--primary');
-          okBtn?.click();
+            btns.find((b) => /^(完成|确定|确认|保存)$/.test((b.innerText || '').replace(/\s+/g, '').trim())) ||
+            modal.querySelector('button.bcc-button--primary, [class*="primary"][class*="btn"]');
+          if (!okBtn) return null;
+          okBtn.scrollIntoView({ block: 'center' });
+          const clickable = okBtn.closest('button, [role="button"]') || okBtn;
+          clickable.click();
+          const r = clickable.getBoundingClientRect();
+          return {
+            x: r.left + r.width / 2,
+            y: r.top + r.height / 2,
+            text: (clickable.innerText || '').replace(/\s+/g, '').trim(),
+          };
         });
+
+        await humanPause(500, 650);
+        const stillOpenAfterDomClick = await page.evaluate(() =>
+          Array.from(
+            document.querySelectorAll('.bcc-dialog, [class*="dialog"], [class*="modal"], [role="dialog"]'),
+          ).some((el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 300 && r.height > 200 && /封面制作/.test(el.innerText || '');
+          }),
+        );
+        if (stillOpenAfterDomClick && confirmBtn && confirmBtn.x > 0 && confirmBtn.y > 0) {
+          await humanMouseClick(page, confirmBtn.x, confirmBtn.y, { radius: 3, tag: 'bili' });
+        }
         await humanPause(1800, 2800, '封面确认', 'bili');
+
+        const stuckOpen = await page.evaluate(() => {
+          const modals = Array.from(
+            document.querySelectorAll('.bcc-dialog, [class*="dialog"], [class*="modal"], [role="dialog"]'),
+          ).filter((el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 300 && r.height > 200 && /封面制作/.test(el.innerText || '');
+          });
+          const modal = modals[modals.length - 1];
+          if (!modal) return false;
+          const closeBtn = modal.querySelector('.bcc-dialog__close, [class*="close"], .icon-close');
+          closeBtn?.click();
+          return true;
+        });
+        if (stuckOpen) {
+          await page.keyboard.press('Escape');
+          await humanPause(550, 750);
+        }
       }
     } catch (e) {
       console.log('cover optional fail', String(e));
