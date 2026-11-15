@@ -3,7 +3,9 @@
  * job: profileId, video, title, topics[], cover?, hotspot?, activity?, autoHotspot?, shotDir?
  */
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import { humanPause, humanMouseClick } from '../lib/pace.mjs';
 import { loadJob, abs } from '../lib/load_job.mjs';
 import {
@@ -13,6 +15,32 @@ import {
   deriveHotspotKeywords,
   scoreCandidateMatch,
 } from '../lib/ego_dom.mjs';
+
+function ensureCoverFile(videoFile, explicitCover) {
+  if (explicitCover && fs.existsSync(explicitCover.replace(/\//g, path.sep))) {
+    return explicitCover;
+  }
+  const outPath = path.join(os.tmpdir(), 'creator-publish-bili-frame0.jpg');
+  const normVideo = videoFile.replace(/\//g, path.sep);
+  try {
+    execFileSync(
+      'ffmpeg',
+      ['-y', '-hwaccel', 'cuda', '-i', normVideo, '-frames:v', '1', '-q:v', '2', outPath],
+      { stdio: 'ignore' },
+    );
+  } catch {
+    try {
+      execFileSync(
+        'ffmpeg',
+        ['-y', '-threads', '4', '-i', normVideo, '-frames:v', '1', '-q:v', '2', outPath],
+        { stdio: 'ignore' },
+      );
+    } catch {
+      return null;
+    }
+  }
+  return fs.existsSync(outPath) ? outPath : null;
+}
 
 const { job } = loadJob();
 const videoPath = abs(job.video);
@@ -54,23 +82,42 @@ async function addBilibiliRecommendedTags(page) {
       (el) => el.childElementCount === 0 && /^推荐标签[:：]?$/.test((el.innerText || '').trim()),
     );
     const row = recLbl?.parentElement || document;
-    const pills = Array.from(row.querySelectorAll('div, span, button')).filter((el) => {
-      if (el === recLbl || el.childElementCount > 1) return false;
-      if (el.closest('.label-item-v2-container, [class*="activity"], [class*="topic"]')) return false;
-      const r = el.getBoundingClientRect();
-      const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
-      const cls = String(el.className || '');
-      if (r.width <= 16 || r.height <= 16 || r.height > 44) return false;
-      if (/active|checked|selected|disabled/.test(cls)) return false;
-      return t && t.length <= 16 && !/^推荐标签/.test(t);
-    });
+    const pills = Array.from(row.querySelectorAll('div, span, button'))
+      .filter((el) => {
+        if (el === recLbl || el.childElementCount > 1) return false;
+        if (el.closest('.label-item-v2-container, [class*="activity"], [class*="topic"]')) return false;
+        const r = el.getBoundingClientRect();
+        const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+        const cls = `${el.className || ''} ${el.parentElement?.className || ''}`;
+        const bg = getComputedStyle(el).backgroundColor;
+        const pbg = el.parentElement ? getComputedStyle(el.parentElement).backgroundColor : '';
+        if (r.width <= 16 || r.height <= 16 || r.height > 44) return false;
+        if (/active|checked|selected|disabled|curr/i.test(cls)) return false;
+        if (
+          bg === 'rgb(0, 161, 214)' ||
+          bg === 'rgb(0, 174, 236)' ||
+          pbg === 'rgb(0, 161, 214)' ||
+          pbg === 'rgb(0, 174, 236)'
+        ) {
+          return false;
+        }
+        return t && t.length <= 16 && !/^推荐标签/.test(t);
+      })
+      .sort((a, b) => a.childElementCount - b.childElementCount);
+    const seenText = new Set();
+    const uniquePills = [];
+    for (const p of pills) {
+      const t = (p.innerText || '').replace(/\s+/g, ' ').trim();
+      const key = t.toLowerCase();
+      if (seenText.has(key)) continue;
+      seenText.add(key);
+      const r = p.getBoundingClientRect();
+      uniquePills.push({ text: t, x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    }
     return {
       existing,
       remain,
-      pills: pills.slice(0, 20).map((p) => {
-        const r = p.getBoundingClientRect();
-        return { text: (p.innerText || '').trim(), x: r.left + r.width / 2, y: r.top + r.height / 2 };
-      }),
+      pills: uniquePills.slice(0, 20),
     };
   });
 
@@ -87,9 +134,13 @@ async function addBilibiliRecommendedTags(page) {
     .sort((a, b) => b.score - a.score || a.idx - b.idx);
 
   const picked = [];
+  const pickedSet = new Set();
   const limit = Math.min(info.remain, 3);
   for (const pill of ranked) {
     if (picked.length >= limit) break;
+    const key = pill.text.toLowerCase();
+    if (pickedSet.has(key)) continue;
+    pickedSet.add(key);
     await humanMouseClick(page, pill.x, pill.y, { radius: 3, tag: 'bili' });
     picked.push(pill.text);
     await humanPause(300, 550);
@@ -184,15 +235,20 @@ async function associateBilibiliActivityTopic(page) {
 
     for (const kw of hotspotKeywords.slice(0, 3)) {
       const inpBox = await page.evaluate(() => {
-        const inp = Array.from(document.querySelectorAll('input[type="text"], input:not([type])')).find((el) => {
+        const inp = Array.from(
+          document.querySelectorAll(
+            'input:not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="hidden"])',
+          ),
+        ).find((el) => {
           const r = el.getBoundingClientRect();
           const ph = el.getAttribute('placeholder') || '';
           return (
-            r.width > 80 &&
-            r.height > 16 &&
+            r.width > 50 &&
+            r.height > 14 &&
             ph !== '请输入稿件标题' &&
             ph !== '按回车键Enter创建标签' &&
-            (/话题|搜索|查找/.test(ph) || el.closest('.bcc-dialog, [class*="modal"], [class*="topic"], [class*="popover"]'))
+            (/话题|搜索|查找/.test(ph) ||
+              el.closest('.bcc-dialog, [class*="modal"], [class*="topic"], [class*="popover"], [class*="dialog"]'))
           );
         });
         if (!inp) return null;
@@ -271,8 +327,9 @@ async function associateBilibiliActivityTopic(page) {
     }
   }
 
-  // 3) Fallback: click best-scoring visible 参与话题 (活动) pill
+  // 3) Fallback: click best-scoring visible 参与话题 (活动) pill only when relevant or explicit
   if (!selectedViaSearch && initial.pills.length) {
+    const explicitActivity = Boolean(job.activity && String(job.activity).trim());
     const rankedVisible = initial.pills
       .map((p, idx) => ({
         ...p,
@@ -281,10 +338,12 @@ async function associateBilibiliActivityTopic(page) {
       }))
       .sort((a, b) => b.score - a.score || a.idx - b.idx);
     const pick = rankedVisible[0];
-    if (pick) {
+    if (pick && (pick.score >= 100 || explicitActivity)) {
       await humanMouseClick(page, pick.x, pick.y, { radius: 3, tag: 'bili' });
       console.log('BILIBILI_ACTIVITY_TOPIC_ASSOCIATED:', pick.text);
       await humanPause(400, 700);
+    } else {
+      console.log('[bili] 参与话题 无相关候选，跳过无关活动');
     }
   }
 }
@@ -363,28 +422,84 @@ try {
     await page.evaluate((t) => {
       const inp = document.querySelector('input[placeholder="按回车键Enter创建标签"]');
       if (!inp) return;
+      inp.scrollIntoView({ block: 'center' });
       inp.focus();
-      inp.value = t;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      if (setter) setter.call(inp, t);
+      else inp.value = t;
       inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
     }, tag);
-    await humanPause(250, 500);
+    await humanPause(250, 450);
     await page.keyboard.press('Enter');
-    await humanPause(500, 900, `标签 ${tag}`, 'bili');
+    await humanPause(550, 850, `标签 ${tag}`, 'bili');
+
+    const added = await page.evaluate((t) => {
+      const target = t.trim().toLowerCase();
+      return Array.from(document.querySelectorAll('.label-item-v2-container')).some((el) =>
+        (el.innerText || '').replace(/[×x\s]/g, '').trim().toLowerCase().includes(target),
+      );
+    }, tag);
+
+    if (!added) {
+      await page.evaluate(() => {
+        const inp = document.querySelector('input[placeholder="按回车键Enter创建标签"]');
+        inp?.scrollIntoView({ block: 'center' });
+        inp?.focus();
+      });
+      await humanPause(150, 280);
+      await page.keyboard.press('Control+a');
+      await humanPause(100, 180);
+      await page.keyboard.press('Backspace');
+      await page.keyboard.insertText(tag);
+      await humanPause(180, 250);
+      await page.keyboard.press('Enter');
+      await humanPause(550, 850, `标签重试 ${tag}`, 'bili');
+    }
   }
 
-  if (coverPath && fs.existsSync(coverPath.replace(/\//g, path.sep))) {
+  const effectiveCover = ensureCoverFile(videoPath, coverPath);
+  if (effectiveCover && fs.existsSync(effectiveCover.replace(/\//g, path.sep))) {
     try {
       await page.evaluate(() => {
-        const coverTab = Array.from(document.querySelectorAll('*')).find(
-          (el) => el.children.length === 0 && /更改封面|封面设置|上传封面/.test(el.innerText || ''),
+        const nodes = Array.from(document.querySelectorAll('div, span, button, a, label'));
+        const leaf = nodes.find(
+          (el) =>
+            el.childElementCount === 0 &&
+            /^\+?\s*添加封面$|^更改封面$|^封面设置$|^上传封面$/.test(
+              (el.innerText || '').replace(/\s+/g, ' ').trim(),
+            ) &&
+            el.getBoundingClientRect().width > 0,
         );
-        coverTab?.click();
+        const box =
+          leaf ||
+          document.querySelector('.cover-upload, [class*="cover-upload"], [class*="cover-select"]');
+        box?.scrollIntoView({ block: 'center' });
+        box?.click();
       });
       await humanPause(1200, 2200);
+      const clickedUploadTab = await page.evaluate(() => {
+        const modal = document.querySelector('.bcc-dialog, [class*="cover"], [class*="modal"]');
+        if (!modal) return false;
+        const tab = Array.from(modal.querySelectorAll('div, span, button, a')).find(
+          (el) =>
+            el.childElementCount <= 1 &&
+            /^上传封面$/.test((el.innerText || '').replace(/\s+/g, '').trim()) &&
+            el.getBoundingClientRect().width > 0,
+        );
+        if (tab) {
+          tab.click();
+          return true;
+        }
+        return false;
+      });
+      if (clickedUploadTab) {
+        await humanPause(600, 1000);
+      }
       const coverInputReady = await page.evaluate(() => {
-        const dialog = document.querySelector('.bcc-dialog, [class*="cover"]');
+        const dialog = document.querySelector('.bcc-dialog, [class*="cover"], [class*="crop"], [class*="modal"]');
         const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter((inp) =>
-          (inp.accept || '').includes('image'),
+          /(image|png|jpg|jpeg|webp)/i.test(inp.accept || ''),
         );
         const inp = dialog?.querySelector('input[type="file"]') || inputs[0];
         if (!inp) return false;
@@ -392,14 +507,19 @@ try {
         return true;
       });
       if (coverInputReady) {
-        await page.setInputFiles('#bili-cover-upload-target', coverPath);
-        await humanPause(3000, 5000, '封面上传', 'bili');
+        await page.setInputFiles('#bili-cover-upload-target', effectiveCover);
+        await humanPause(2500, 4000, '封面上传', 'bili');
         await page.evaluate(() => {
-          const dialog = document.querySelector('.bcc-dialog');
-          const primary = dialog?.querySelector('button.bcc-button--primary');
-          if (primary) primary.click();
+          const dialog = document.querySelector('.bcc-dialog, [class*="cover"], [class*="modal"]') || document;
+          const okBtn =
+            Array.from(dialog.querySelectorAll('button, [role="button"], span')).find(
+              (b) =>
+                /^(完成|确定|确认)$/.test((b.innerText || '').replace(/\s+/g, '').trim()) &&
+                b.getBoundingClientRect().width > 0,
+            ) || dialog.querySelector('button.bcc-button--primary');
+          okBtn?.click();
         });
-        await humanPause(1500, 2500, '封面确认', 'bili');
+        await humanPause(1800, 2800, '封面确认', 'bili');
       }
     } catch (e) {
       console.log('cover optional fail', String(e));
