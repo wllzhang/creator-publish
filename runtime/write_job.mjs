@@ -86,9 +86,10 @@ const job = {
   author: args.author || null,
   // resolved at run time by wechat_mp_draft.mjs from --egress / env / api-env
   egress: args.egress || process.env.WECHAT_MP_EGRESS || null,
-  // fanqie
+  // fanqie / bilibili
   bodyFile: absOrNull(args['body-file']),
-  category: args.category || null,
+  category: args.category || args.partition || null,
+  partition: args.partition || args.category || null,
   // ximalaya
   mp3: absOrNull(args.mp3),
   lrc: absOrNull(args.lrc),

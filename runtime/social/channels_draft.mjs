@@ -445,6 +445,47 @@ try {
   }
   await humanPause(1200, 2200, '正文话题后', 'wxch');
 
+  // 位置设置：默认不添加位置（清除平台根据 IP 自动匹配的所在地，如「洛阳市」）
+  try {
+    const locState = await evalAllRoots(page, (roots) => {
+      for (const { root } of roots) {
+        const posDisplay = root.querySelector('.post-position-wrap .position-display');
+        const locNameEl = root.querySelector('.post-position-wrap .location-name');
+        const currentLoc = locNameEl ? (locNameEl.innerText || '').trim() : '';
+        if (posDisplay && currentLoc && currentLoc !== '不显示位置') {
+          posDisplay.click();
+          return { ok: true, currentLoc };
+        }
+      }
+      return { ok: false };
+    });
+    if (locState?.ok) {
+      await humanPause(600, 1000);
+      const optClicked = await evalAllRoots(page, (roots) => {
+        for (const { root } of roots) {
+          const target = Array.from(root.querySelectorAll('.option-item')).find((el) => {
+            const t = (el.innerText || '').trim();
+            return t === '不显示位置' || t.includes('不显示位置');
+          });
+          if (target) {
+            target.scrollIntoView({ block: 'center' });
+            target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+            target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            target.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+            target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            target.click();
+            return true;
+          }
+        }
+        return false;
+      });
+      console.log(`[wxch] 清除位置（原默认: ${locState.currentLoc} -> 已切换为 不显示位置）:`, optClicked);
+      await humanPause(500, 800);
+    }
+  } catch (e) {
+    console.warn('[wxch] 位置设置 note:', String(e?.message || e).slice(0, 100));
+  }
+
   if (schedule) {
     console.log(`[wxch] 定时发布需求: ${schedule.dateTimeStr}`);
     // 微信视频号平台限制：页面明确提示「使用定时发表将无法保存草稿。若要保存草稿，需先取消定时发表。」

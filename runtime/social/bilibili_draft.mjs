@@ -43,6 +43,31 @@ function ensureCoverFile(videoFile, explicitCover) {
   return fs.existsSync(outPath) ? outPath : null;
 }
 
+function inferBilibiliPartition(title = '', tags = []) {
+  const combined = (title + ' ' + tags.join(' ')).toLowerCase();
+  if (
+    /汽车|车|特斯拉|比亚迪|蔚来|小鹏|理想|小米su7|召回|车机|续航|底盘|轮胎|轮毂|驾驶|驾考|机油|发动机|变速箱|新能源|电动车|混动|插混|增程|交通|车险|保费|交警/.test(
+      combined,
+    )
+  ) {
+    return '汽车';
+  }
+  if (
+    /人工智能|\bai\b|大模型|chatgpt|claude|agent|智能体|提示词|深度学习|算力|gpu|英伟达|transformer|扩散模型/.test(
+      combined,
+    )
+  ) {
+    return '人工智能';
+  }
+  if (/数码|手机|芯片|半导体|显卡|cpu|电脑|平板|硬件|鸿蒙|安卓|ios|苹果|华为|小米/.test(combined)) {
+    return '科技数码';
+  }
+  if (/科普|原理|为什么|揭秘|冷知识|物理|化学|生物|地理|历史|经济|财金|法律|常识|机制/.test(combined)) {
+    return '知识';
+  }
+  return '知识';
+}
+
 const { job } = loadJob();
 const videoPath = abs(job.video);
 const coverPath = job.cover ? abs(job.cover) : null;
@@ -417,6 +442,58 @@ try {
     const desc = document.querySelector('.ql-editor');
     if (desc) desc.innerHTML = '';
   });
+
+  // 分区选择（若 job 指定了 partition/category，或根据标题/标签智能推断，杜绝无干预时平台默认记忆残留的分区）
+  const explicitPartition = job.partition || job.category;
+  const targetPartition = explicitPartition || inferBilibiliPartition(title, allTags);
+  console.log(`[bili] 目标分区: ${targetPartition} (显式指定: ${explicitPartition ? '是' : '否，智能推断'})`);
+
+  try {
+    const partRes = await page.evaluate(async (target) => {
+      const vht = document.querySelector('.video-human-type');
+      if (!vht) return { ok: false, reason: 'no .video-human-type' };
+
+      const currentText = vht.querySelector('.select-controller')?.innerText.trim() || '';
+      if (currentText.includes(target)) {
+        return { ok: true, already: true, currentText };
+      }
+
+      const selectCtrl = vht.querySelector('.select-controller');
+      if (!selectCtrl) return { ok: false, reason: 'no select-controller' };
+
+      selectCtrl.scrollIntoView({ block: 'center' });
+      selectCtrl.click();
+      await new Promise((r) => setTimeout(r, 600));
+
+      const items = Array.from(document.querySelectorAll('.video-human-type .drop-list-v2-item'));
+      const hit = items.find((el) => {
+        const titleAttr = (el.getAttribute('title') || '').trim();
+        const text = (el.innerText || '').trim();
+        return titleAttr === target || text.includes(target);
+      });
+
+      if (!hit) {
+        return {
+          ok: false,
+          reason: 'partition item not found',
+          target,
+          available: items.map((i) => i.getAttribute('title') || i.innerText.trim()).slice(0, 15),
+        };
+      }
+
+      hit.scrollIntoView({ block: 'center' });
+      hit.click();
+      await new Promise((r) => setTimeout(r, 600));
+
+      const afterText = vht.querySelector('.select-controller')?.innerText.trim() || '';
+      return { ok: true, before: currentText, after: afterText };
+    }, targetPartition);
+
+    console.log('[bili] 分区选择结果:', JSON.stringify(partRes));
+    await humanPause(600, 1000, '选择分区后', 'bili');
+  } catch (e) {
+    console.warn('[bili] 分区选择 note:', String(e?.message || e).slice(0, 100));
+  }
 
   await clearExistingTags(page);
 
