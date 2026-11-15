@@ -375,14 +375,14 @@ try {
       console.log('[xhs] 定时发布开关:', JSON.stringify(switchRes));
       await humanPause(1000, 1600, '开启定时开关后', 'xhs');
 
-      const popOpen = await page.evaluate(() => {
+      const scrolled = await page.evaluate(() => {
         const picker = document.querySelector('.date-picker-container');
         if (!picker) return false;
         picker.scrollIntoView({ block: 'center' });
-        picker.click();
         return true;
       });
-      if (popOpen) {
+      if (scrolled) {
+        await page.click('.date-picker-container');
         await humanPause(1000, 1600, '打开日期时间弹窗', 'xhs');
 
         const dayRes = await page.evaluate((targetDay) => {
