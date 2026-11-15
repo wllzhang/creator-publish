@@ -148,7 +148,7 @@ function runSshEgress({
   const stamp = Date.now().toString(16);
   const remoteBase = `/tmp/creator_publish_wechat_${stamp}`;
   const sshArgs = sshBase(host);
-  const scpOpts = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15'];
+  const scpOpts = ['-C', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15'];
 
   console.log(`[*] egress=ssh ${host} (${egressNote})`);
   if (expectIp) console.log(`[*] expected whitelist IP ${expectIp}`);

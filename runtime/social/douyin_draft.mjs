@@ -170,113 +170,112 @@ async function associateDouyinHotspotAndActivity(page) {
   });
   console.log('[dy] hotspot/activity form labels:', JSON.stringify(formProbe));
 
-  // 1) 关联热点 / 申请关联热点
+  // 1) 关联热点 / 申请关联热点（严格锁定单行容器 < 95px，优先定位「点击输入热点词」）
   let hotspotAssociated = false;
-  const hotspotRow = await page.evaluate(() => {
+  const hotspotTrigger = await page.evaluate(() => {
     const lbl = Array.from(document.querySelectorAll('div, span, label')).find((el) => {
       const t = (el.innerText || '').replace(/\s+/g, '').trim();
       return (/^(?:申请)?关联热点/.test(t) || t === '热点') && el.childElementCount <= 2 && el.offsetWidth > 0;
     });
+    if (lbl) lbl.scrollIntoView({ block: 'center' });
+
+    // Direct match on「点击输入热点词」placeholder/div or input[placeholder*="热点"]
+    const directPh = Array.from(document.querySelectorAll('input[placeholder*="热点"], div, span')).find((el) => {
+      if (el.closest('.zone-container, [contenteditable="true"]')) return false;
+      if (el.matches('input[placeholder*="热点"]')) return el.offsetWidth > 40;
+      const t = (el.innerText || '').replace(/\s+/g, '').trim();
+      return el.childElementCount <= 1 && (t === '点击输入热点词' || t === '请输入热点词') && el.offsetWidth > 40;
+    });
+    if (directPh) {
+      const r = directPh.getBoundingClientRect();
+      return { found: true, kind: 'direct', x: r.left + r.width / 2, y: r.top + r.height / 2, text: directPh.innerText || directPh.getAttribute('placeholder') || '' };
+    }
+
     if (!lbl) return { found: false };
-    lbl.scrollIntoView({ block: 'center' });
-    // Walk up 1-3 ancestors to find an input / combobox / select / clickable trigger or chip
     let box = lbl.parentElement;
-    for (let d = 0; d < 4 && box; d++) {
+    for (let d = 0; d < 2 && box; d++) {
+      const br = box.getBoundingClientRect();
+      if (br.height > 110 || box.querySelector('.zone-container')) break;
       const inp = box.querySelector('input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), [role="combobox"], .semi-select');
-      const chips = Array.from(box.querySelectorAll('button, span, div')).filter(
-        (el) => el !== lbl && el.childElementCount <= 1 && el.offsetWidth > 20 && el.offsetHeight > 14 && el.offsetHeight < 48,
-      );
-      if (inp || chips.length > 0) {
-        const ir = inp ? inp.getBoundingClientRect() : null;
-        return {
-          found: true,
-          hasInput: !!inp,
-          inputPlaceholder: inp?.getAttribute('placeholder') || '',
-          ix: ir ? ir.left + ir.width / 2 : 0,
-          iy: ir ? ir.top + ir.height / 2 : 0,
-          chips: chips.slice(0, 15).map((c) => {
-            const cr = c.getBoundingClientRect();
-            return { text: (c.innerText || '').trim(), x: cr.left + cr.width / 2, y: cr.top + cr.height / 2 };
-          }),
-        };
+      if (inp) {
+        const ir = inp.getBoundingClientRect();
+        if (ir.width > 40) {
+          return { found: true, kind: 'row-control', x: ir.left + ir.width / 2, y: ir.top + ir.height / 2, text: inp.getAttribute('placeholder') || inp.innerText || '' };
+        }
       }
       box = box.parentElement;
     }
-    return { found: true, hasInput: false, chips: [] };
+    return { found: true, kind: 'label-only' };
   });
 
-  if (hotspotRow.found) {
-    // Check direct recommended hotspot chips first
-    const directChip = hotspotRow.chips
-      .filter((c) => !/^(?:申请)?关联热点|请输入|请选择|搜索|更多$/.test(c.text))
-      .map((c) => ({ ...c, score: scoreCandidateMatch(c.text, hotspotKeywords) }))
-      .filter((c) => c.score >= 300)
-      .sort((a, b) => b.score - a.score)[0];
-    if (directChip) {
-      await humanMouseClick(page, directChip.x, directChip.y, { radius: 3, tag: 'dy' });
-      console.log('DOUYIN_HOTSPOT_ASSOCIATED:', directChip.text);
-      hotspotAssociated = true;
-    }
+  if (hotspotTrigger.found && hotspotTrigger.x > 0) {
+    console.log('[dy] hotspot trigger:', JSON.stringify(hotspotTrigger));
+    for (const kw of hotspotKeywords.slice(0, 4)) {
+      await humanMouseClick(page, hotspotTrigger.x, hotspotTrigger.y, { radius: 3, tag: 'dy' });
+      await humanPause(450, 650);
+      // If clicking revealed a focused or newly mounted input in the hotspot row / portal, type into it
+      await page.evaluate(() => {
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+        const inp = Array.from(document.querySelectorAll('input[placeholder*="热点"], .semi-portal input, .semi-popover input')).find(
+          (el) => el.offsetWidth > 30 && !el.closest('.zone-container'),
+        );
+        inp?.focus();
+      });
+      await page.keyboard.press('Control+a');
+      await humanPause(100, 200);
+      await page.keyboard.press('Backspace');
+      await page.keyboard.insertText(kw);
+      await humanPause(1300, 1800, `热点搜索 ${kw}`, 'dy');
 
-    if (!hotspotAssociated && hotspotRow.hasInput && hotspotRow.ix > 0) {
-      for (const kw of hotspotKeywords.slice(0, 4)) {
-        await humanMouseClick(page, hotspotRow.ix, hotspotRow.iy, { radius: 3, tag: 'dy' });
-        await humanPause(300, 500);
-        // If clicking .semi-select revealed an inner input, focus it via keyboard
-        await page.keyboard.press('Control+a');
-        await humanPause(100, 200);
-        await page.keyboard.press('Backspace');
-        await page.keyboard.insertText(kw);
-        await humanPause(1100, 1700, `热点搜索 ${kw}`, 'dy');
-
-        const opts = await page.evaluate(() => {
-          const sels = [
-            '.semi-select-option',
-            '[role="listbox"] [role="option"]',
-            '[class*="select-option"]',
-            '[class*="hotspot"] [class*="item"]',
-            '[class*="dropdown"] [class*="option"]',
-            '[class*="popover"] li',
-          ];
-          const out = [];
-          const seen = new Set();
-          for (const sel of sels) {
-            for (const el of Array.from(document.querySelectorAll(sel))) {
-              if (seen.has(el)) continue;
-              seen.add(el);
-              const r = el.getBoundingClientRect();
-              if (r.width <= 30 || r.height <= 16) continue;
-              const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
-              if (!t || /暂无|无匹配|加载中|没有找到|未找到|搜索/.test(t)) continue;
-              out.push({ text: t, x: r.left + r.width / 2, y: r.top + r.height / 2 });
-            }
-          }
-          return out.slice(0, 15);
-        });
-
-        if (opts.length) {
-          const ranked = opts
-            .map((o) => ({ ...o, score: scoreCandidateMatch(o.text, hotspotKeywords, { includeGeneralHints: true }) }))
-            .sort((a, b) => b.score - a.score);
-          const pick = ranked[0];
-          if (pick && (pick.score > 0 || opts.length <= 10)) {
-            await humanMouseClick(page, pick.x, pick.y, { radius: 3, tag: 'dy' });
-            console.log('DOUYIN_HOTSPOT_ASSOCIATED:', pick.text);
-            hotspotAssociated = true;
-            await humanPause(400, 700);
-            break;
+      const opts = await page.evaluate(() => {
+        const sels = [
+          '.semi-portal .semi-select-option',
+          '.semi-popover .semi-select-option',
+          '.semi-select-option-list > *',
+          '[role="listbox"] [role="option"]',
+          '[class*="select-option"]',
+          '[class*="hotspot"] [class*="item"]',
+        ];
+        const out = [];
+        const seen = new Set();
+        for (const sel of sels) {
+          for (const el of Array.from(document.querySelectorAll(sel))) {
+            if (seen.has(el) || el.closest('.zone-container, [contenteditable="true"]')) continue;
+            seen.add(el);
+            const r = el.getBoundingClientRect();
+            if (r.width <= 30 || r.height <= 16) continue;
+            const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+            if (!t || /暂无|无匹配|加载中|没有找到|未找到|点击输入热点词|请输入热点词/.test(t)) continue;
+            out.push({ text: t, x: r.left + r.width / 2, y: r.top + r.height / 2 });
           }
         }
+        return out.slice(0, 15);
+      });
+      console.log(`[dy] hotspot options for "${kw}":`, JSON.stringify(opts.map((o) => o.text.slice(0, 40))));
+
+      if (opts.length) {
+        const ranked = opts
+          .map((o) => ({ ...o, score: scoreCandidateMatch(o.text, hotspotKeywords, { includeGeneralHints: true }) }))
+          .sort((a, b) => b.score - a.score);
+        const pick = ranked[0];
+        if (pick && (pick.score > 0 || opts.length <= 10)) {
+          await humanMouseClick(page, pick.x, pick.y, { radius: 3, tag: 'dy' });
+          console.log('DOUYIN_HOTSPOT_ASSOCIATED:', pick.text);
+          hotspotAssociated = true;
+          await humanPause(400, 700);
+          break;
+        }
       }
-      await page.keyboard.press('Escape');
-      await humanPause(200, 400);
     }
+    await page.keyboard.press('Escape');
+    await humanPause(200, 400);
   }
   if (!hotspotAssociated) {
     console.log('[dy] no hotspot dropdown match available on current form (continuing draft save)');
   }
 
-  // 2) 官方活动（仅匹配显式活动/核心词/科普标签，不乱点无关推广活动）
+  // 2) 官方活动（严格限定在官方活动单行容器内，彻底排除 .zone-container 话题胶囊）
   const activityMatch = await page.evaluate(() => {
     const lbl = Array.from(document.querySelectorAll('div, span, label')).find((el) => {
       const t = (el.innerText || '').replace(/\s+/g, '').trim();
@@ -284,12 +283,14 @@ async function associateDouyinHotspotAndActivity(page) {
     });
     if (!lbl) return null;
     let box = lbl.parentElement;
-    for (let d = 0; d < 3 && box; d++) {
+    for (let d = 0; d < 2 && box; d++) {
+      const br = box.getBoundingClientRect();
+      if (br.height > 120 || box.querySelector('.zone-container')) break;
       const pills = Array.from(box.querySelectorAll('div, span, button')).filter((el) => {
-        if (el === lbl || el.childElementCount > 2) return false;
+        if (el === lbl || el.childElementCount > 2 || el.closest('.zone-container, [contenteditable="true"]')) return false;
         const r = el.getBoundingClientRect();
         const t = (el.innerText || '').trim();
-        return r.width > 20 && r.height > 16 && r.height < 52 && t && !/官方活动|参与活动可|更多/.test(t);
+        return r.width > 30 && r.height > 16 && r.height < 56 && t && !/^官方活动|活动详情|参与活动可|更多|\+\d+$/.test(t);
       });
       if (pills.length) {
         return pills.slice(0, 12).map((p) => {
@@ -303,6 +304,7 @@ async function associateDouyinHotspotAndActivity(page) {
   });
 
   if (Array.isArray(activityMatch) && activityMatch.length) {
+    console.log('[dy] official activity candidates:', JSON.stringify(activityMatch.map((a) => a.text.slice(0, 36))));
     const bestAct = activityMatch
       .map((a) => ({ ...a, score: scoreCandidateMatch(a.text, hotspotKeywords, { includeGeneralHints: true }) }))
       .filter((a) => a.score >= 100)
@@ -331,6 +333,31 @@ try {
     throw new Error('NEED_LOGIN_DOUYIN');
   }
 
+  // Dismiss stale resume draft banner if present so fresh upload starts clean
+  const dismissedBanner = await page.evaluate(() => {
+    const body = document.body?.innerText || '';
+    if (!/上次未发布的视频/.test(body)) return false;
+    const giveUp = Array.from(document.querySelectorAll('span, a, button, div')).find(
+      (el) => el.childElementCount === 0 && (el.innerText || '').replace(/\s+/g, '').trim() === '放弃' && el.offsetWidth > 0,
+    );
+    if (giveUp) {
+      giveUp.click();
+      return true;
+    }
+    return false;
+  });
+  if (dismissedBanner) {
+    console.log('[dy] 检测到上次暂存草稿横幅，已点击「放弃」开始新上传');
+    await humanPause(800, 1300);
+    await page.evaluate(() => {
+      const ok = Array.from(document.querySelectorAll('[role="dialog"] button, [class*="modal"] button, button')).find(
+        (b) => /^(确定|确认|放弃)$/.test((b.innerText || '').replace(/\s+/g, '').trim()) && b.offsetWidth > 0,
+      );
+      ok?.click();
+    });
+    await humanPause(800, 1300);
+  }
+
   await humanPause(1200, 2800, '选视频前', 'dy');
   await page.setInputFiles('input[type="file"]', videoPath);
 
@@ -345,13 +372,14 @@ try {
     waited += 1500;
   }
 
-  // Wait for upload completion & title input ready
+  // Wait for 100% upload completion & title input ready (max 120s)
   let formReady = false;
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 80; i++) {
     const st = await page.evaluate(() => {
       const body = document.body?.innerText || '';
       const uploading =
-        (/上传中|正在上传/.test(body) || /上传\s*\d+\s*%/.test(body)) && !body.includes('重新上传');
+        (/上传中|正在上传|上传过程中|取消上传|已上传/.test(body) || /\b\d{1,2}\s*%/.test(body)) &&
+        !body.includes('重新上传');
       const hasTitle = !!document.querySelector('input[placeholder*="填写作品标题"]');
       return { uploading, hasTitle };
     });
