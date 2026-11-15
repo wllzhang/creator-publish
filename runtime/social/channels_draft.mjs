@@ -16,9 +16,16 @@ import {
   scoreCandidateMatch,
 } from '../lib/ego_dom.mjs';
 
+function toChannelsShortTitle(raw) {
+  const s = String(raw || '').replace(/\s+/g, ' ').trim();
+  const chars = Array.from(s);
+  if (chars.length <= 16) return s;
+  return chars.slice(0, 16).join('').replace(/[，。；：、,\s]+$/, '');
+}
+
 const { job } = loadJob();
 const videoPath = abs(job.video);
-const shortTitle = job.title;
+const shortTitle = toChannelsShortTitle(job.title);
 const postContent = job.body ? String(job.body).trim() : String(job.title || '').trim();
 const topics = normalizeTopics(job.topics);
 const autoHotspot = job.autoHotspot !== false;
@@ -385,12 +392,19 @@ try {
           });
           if (!lbl) continue;
           let box = lbl.parentElement;
-          for (let d = 0; d < 3 && box; d++) {
+          for (let d = 0; d < 2 && box; d++) {
             const items = Array.from(box.querySelectorAll('div, span, button, li')).filter((el) => {
               if (el === lbl || el.childElementCount > 2) return false;
+              if (el.closest('[contenteditable="true"], .post-desc-box')) return false;
               const r = el.getBoundingClientRect();
               const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
-              return r.width > 24 && r.height > 16 && r.height < 52 && t && !/活动|选择|请选择|不参加/.test(t);
+              return (
+                r.width > 24 &&
+                r.height > 16 &&
+                r.height < 52 &&
+                t &&
+                !/活动|选择|请选择|不参加|不参与/.test(t)
+              );
             });
             if (items.length) {
               return items.slice(0, 12).map((el) => (el.innerText || '').replace(/\s+/g, ' ').trim());
