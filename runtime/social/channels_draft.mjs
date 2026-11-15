@@ -530,7 +530,13 @@ try {
         }
         const toast = toastNodes.join(' | ');
         const href = location.href || '';
-        const text = roots.map((r) => r.root.body?.innerText || r.root.textContent || '').join('\n').slice(0, 12000);
+        const text = roots
+          .map((r) => {
+            const el = r.root.body || r.root;
+            return el.innerText || el.textContent || '';
+          })
+          .join('\n')
+          .slice(0, 12000);
         const hasErr = /不成功|失败|超过\d+字|限制/.test(toast);
         const toastOk = !hasErr && /草稿.*成功|保存成功|已保存至草稿|成功保存/.test(toast);
         const leftCreate = /draftListManager|草稿箱/.test(href) || !/post\/create/.test(href);
@@ -571,7 +577,12 @@ try {
     const inList = await evalAllRoots(
       page,
       (roots, needles) => {
-        const text = roots.map((r) => r.root.body?.innerText || r.root.textContent || '').join('\n');
+        const text = roots
+          .map((r) => {
+            const el = r.root.body || r.root;
+            return el.innerText || el.textContent || '';
+          })
+          .join('\n');
         return needles.some((n) => n && text.includes(n));
       },
       [shortTitle, listNeedle],
