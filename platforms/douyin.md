@@ -17,10 +17,13 @@ allowed_modes: [draft, submit]
 | title | yes | title |
 | topics | no | topic/hashtag list（抖音单条最多支持 5 个 `#话题`，超出会自动截断前 5 个以避免编辑器粘连） |
 | body | no | optional description placed before topics |
+| hotspot / activity | no | optional explicit hotspot / official activity keyword(s); defaults to auto-derived keywords from `topics` + `title` |
+| no-auto-hotspot / shot-dir | no | disable automatic hotspot/topic/activity matching (`--no-auto-hotspot`) or set screenshot directory (`--shot-dir`) |
 
 ## notes
 
 - Draft path clicks **「暂存离开」**（never「发布」）and confirms any leave/save prompt; merely stopping on `/content/publish` before closing `taskSpace` does NOT persist the draft.
+- By default (`autoHotspot`), picks live `#添加话题` dropdown suggestions (handles both `#词条` and `# 词条` spacing), tops up `<5` topics from matching `推荐` chips, and probes **申请关联热点 / 关联热点** & **官方活动** using `deriveHotspotKeywords(job)`.
 - Douyin stores the suspended draft in **「作品发布 → 发布视频」**（`https://creator.douyin.com/creator-micro/content/upload`）top banner：**`你还有上次未发布的视频，是否继续编辑？ → 继续编辑`**（not in `内容管理 → 作品`）.
 
 ## success_when

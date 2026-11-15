@@ -50,6 +50,11 @@ const images = splitList(args.images).map((p) => absOrNull(p));
 const keywords = splitList(args.keywords);
 const mode = args.mode || DEFAULT_MODE[platform];
 const out = path.resolve(args.out || tmpJoin('creator-publish-job.json'));
+const autoHotspot = !(
+  args['no-auto-hotspot'] === true ||
+  args['no-auto-hotspot'] === 'true' ||
+  args['auto-hotspot'] === 'false'
+);
 
 const job = {
   platform,
@@ -62,6 +67,9 @@ const job = {
   cover: absOrNull(args.cover),
   body: readMaybeFile(args.body, args['body-file']),
   shotDir: absOrNull(args['shot-dir']),
+  hotspot: args.hotspot || null,
+  activity: args.activity || null,
+  autoHotspot,
   // xiaohongshu
   images: images.length ? images : null,
   // wechat

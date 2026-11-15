@@ -1,16 +1,27 @@
 /**
- * 小红书草稿。job: profileId, images[], title, body?, topics?
- * 话题：点「话题」→ 键入词条 → 空格，生成 <a class="tiptap-topic">；默认勾选原创声明。
+ * 小红书草稿。job: profileId, images[], title, body?, topics?, hotspot?, activity?, autoHotspot?, shotDir?
+ * 话题：点「话题」→ 键入词条 → 优先点选实时热门下拉联想生成 <a class="tiptap-topic">（未匹配则空格兜底）；默认勾选原创声明。
  */
+import path from 'node:path';
 import { humanPause, humanMouseClick } from '../lib/pace.mjs';
 import { loadJob, abs } from '../lib/load_job.mjs';
-import { normalizeTopics } from '../lib/ego_dom.mjs';
+import {
+  resolveShotDir,
+  safeShot,
+  normalizeTopics,
+  deriveHotspotKeywords,
+  cleanSuggestLabel,
+  scoreCandidateMatch,
+} from '../lib/ego_dom.mjs';
 
 const { job } = loadJob();
 const images = (job.images || []).map((p) => abs(p)).filter(Boolean);
 const title = (job.title || '').slice(0, 20);
 const desc = job.body || '';
 const topicsList = normalizeTopics(job.topics);
+const autoHotspot = job.autoHotspot !== false;
+const hotspotKeywords = deriveHotspotKeywords(job);
+const shotDir = resolveShotDir(job);
 
 let descHtml = '';
 if (!desc) {
@@ -69,30 +80,61 @@ async function clickTopicButton() {
 
 async function waitTopicSuggestion(keyword, { tries = 15 } = {}) {
   for (let i = 0; i < tries; i++) {
-    await humanPause(200, 380);
-    const hit = await page.evaluate((kw) => {
-      const items = Array.from(document.querySelectorAll('.tippy-content .item, .items .item'));
-      if (!items.length) return null;
-      const exact = items.find((el) => {
-        const t = (el.innerText || '').trim().replace(/\s+/g, ' ');
-        return t === `#${kw}` || t.startsWith(`#${kw} `);
-      });
-      const selected = items.find((el) => el.classList.contains('is-selected'));
-      const target = exact || selected || null;
-      if (!target) return null;
-      const t = (target.innerText || '').trim().replace(/\s+/g, ' ');
-      const matched = t === `#${kw}` || t.startsWith(`#${kw} `);
-      const r = target.getBoundingClientRect();
-      return {
-        matched,
-        text: t.slice(0, 48),
-        x: r.left + r.width / 2,
-        y: r.top + r.height / 2,
-      };
-    }, keyword);
-    if (hit?.matched) return hit;
+    await humanPause(200, 360);
+    const candidates = await page.evaluate(() => {
+      const sels = ['.tippy-content .item', '.items .item', '[class*="topic-list"] [class*="item"]', '.tippy-box .item'];
+      const seen = new Set();
+      const rows = [];
+      for (const sel of sels) {
+        const list = Array.from(document.querySelectorAll(sel));
+        for (let idx = 0; idx < list.length; idx++) {
+          const el = list[idx];
+          if (seen.has(el)) continue;
+          seen.add(el);
+          const r = el.getBoundingClientRect();
+          if (r.width <= 10 || r.height <= 10) continue;
+          const text = (el.innerText || '').trim().replace(/\s+/g, ' ');
+          if (!text || /^创建新话题|^新建话题/.test(text)) continue;
+          rows.push({
+            sel,
+            domIdx: idx,
+            text,
+            isSelected: el.classList.contains('is-selected'),
+            x: r.left + r.width / 2,
+            y: r.top + r.height / 2,
+          });
+        }
+      }
+      return rows.slice(0, 20);
+    });
+    if (!candidates.length) continue;
+
+    let best = null;
+    let bestScore = 0;
+    for (const item of candidates) {
+      const clean = cleanSuggestLabel(item.text);
+      if (!clean) continue;
+      let score = scoreCandidateMatch(clean, [keyword]);
+      if (score === 0) {
+        const kwLower = keyword.toLowerCase();
+        const cLower = clean.toLowerCase();
+        if (kwLower.length >= 2 && cLower.includes(kwLower.slice(0, Math.min(4, kwLower.length)))) {
+          score = 220;
+        }
+      }
+      if (item.isSelected && score > 0) score += 20;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { ...item, clean, score };
+      }
+    }
+    if (best) return best;
   }
   return null;
+}
+
+async function countTiptapTopics() {
+  return page.evaluate(() => document.querySelectorAll('.tiptap.ProseMirror a.tiptap-topic').length);
 }
 
 async function fillTopics(topics) {
@@ -112,21 +154,65 @@ async function fillTopics(topics) {
 
   for (const kw of topics) {
     console.log(`topic #${kw}`);
+    const beforeCount = await countTiptapTopics();
     await focusEditorEnd();
     await clickTopicButton();
-    await humanPause(300, 600, '点话题后', 'xhs');
+    await humanPause(300, 550, '点话题后', 'xhs');
     await page.keyboard.type(kw, { delay: 35 + Math.floor(Math.random() * 55) });
-    // Wait until tippy highlights the typed keyword, then Space (XHS converts to a.tiptap-topic).
+    // Prefer clicking the live platform suggestion so XHS attaches the real trending topic ID.
     const sug = await waitTopicSuggestion(kw);
+    let insertedByClick = false;
     if (sug) {
-      console.log('[xhs] suggestion ready:', sug.text);
-      await page.keyboard.type(' ');
-    } else {
-      // No list (custom / slow): Space still creates the topic; avoid clicking recommend chips.
-      console.warn('[xhs] no tippy match, Space fallback:', kw);
+      console.log('[xhs] XHS_HOTSPOT_SUGGEST_PICKED:', sug.text);
+      await humanMouseClick(page, sug.x, sug.y, { radius: 3, tag: 'xhs' });
+      await humanPause(350, 550);
+      if ((await countTiptapTopics()) > beforeCount) {
+        insertedByClick = true;
+      } else {
+        await page.evaluate(({ sel, domIdx }) => {
+          document.querySelectorAll(sel)[domIdx]?.click();
+        }, sug);
+        await humanPause(300, 500);
+        if ((await countTiptapTopics()) > beforeCount) insertedByClick = true;
+      }
+    }
+    if (!insertedByClick) {
+      console.warn('[xhs] no tippy click confirmation, Space fallback:', kw);
       await page.keyboard.type(' ');
     }
-    await humanPause(350, 650, '空格确认话题', 'xhs');
+    await humanPause(350, 650, '确认话题', 'xhs');
+  }
+
+  if (autoHotspot) {
+    const currentCount = await countTiptapTopics();
+    if (currentCount < 6) {
+      const recChips = await page.evaluate(() => {
+        const list = Array.from(
+          document.querySelectorAll('[class*="topic-recommend"] span, [class*="recommend-topic"] span, [class*="recommend"] [class*="tag"]'),
+        ).filter((el) => {
+          if (el.closest('.tiptap.ProseMirror')) return false;
+          const r = el.getBoundingClientRect();
+          const t = (el.innerText || '').trim();
+          return r.width > 16 && r.height > 14 && t && t !== '话题' && t.length <= 20;
+        });
+        return list.slice(0, 12).map((el) => {
+          const r = el.getBoundingClientRect();
+          return { text: (el.innerText || '').trim(), x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        });
+      });
+      const existingNames = new Set(topics.map((t) => t.toLowerCase()));
+      const pickedRecs = recChips
+        .filter((c) => !existingNames.has(c.text.replace(/^#/, '').toLowerCase()))
+        .map((c) => ({ ...c, score: scoreCandidateMatch(c.text, hotspotKeywords, { includeGeneralHints: true }) }))
+        .filter((c) => c.score >= 100)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, Math.min(2, 6 - currentCount));
+      for (const chip of pickedRecs) {
+        await humanMouseClick(page, chip.x, chip.y, { radius: 2, tag: 'xhs' });
+        console.log('[xhs] XHS_RECOMMEND_TOPIC_ADDED:', chip.text);
+        await humanPause(350, 550);
+      }
+    }
   }
 
   const topicNames = await page.evaluate(() =>
@@ -140,7 +226,7 @@ async function fillTopics(topics) {
   );
   console.log('tiptap-topic:', topicNames.length, 'of', topics.length, topicNames);
   const missing = topics.filter((t) => !topicNames.includes(t));
-  if (missing.length) console.warn('[xhs] missing topics after Space:', missing.join(', '));
+  if (missing.length) console.warn('[xhs] missing topics after fillTopics:', missing.join(', '));
 }
 
 async function readOriginalOn() {
@@ -270,6 +356,7 @@ try {
 
   await enableOriginalDeclaration();
   await humanPause(800, 1600, '原创声明后', 'xhs');
+  await safeShot(page, path.join(shotDir, 'xhs_before_draft.png'), { fullPage: true });
 
   await humanPause(3000, 6000, '点暂存前', 'xhs');
   const clickSave = await page.evaluate(() => {
@@ -308,6 +395,8 @@ try {
       break;
     }
   }
+  await humanPause(600, 1200);
+  await safeShot(page, path.join(shotDir, 'xhs_after_draft.png'));
   if (!savedOk) console.warn('未检测到保存成功 toast，请人工看草稿箱');
   console.log('XHS_STAGED_DONE');
 } finally {

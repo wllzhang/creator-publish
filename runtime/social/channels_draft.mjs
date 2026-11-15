@@ -1,18 +1,28 @@
 /**
  * 视频号：支持 document / iframe / wujie-app shadowRoot 多根挂载。
- * 上传视频 → 填短标题与视频描述 → 用「#话题」+ 键入词条 + 空格生成蓝色话题标签 → 点「保存草稿」（不点发表）。
- * job: profileId, video, title（短标题）, body（可选）, topics（可选）, shotDir?
+ * 上传视频 → 填短标题与视频描述 → 用「#话题」+ 优先选热词下拉推荐/敲空格生成蓝色话题标签 + 按需关联推荐话题/活动 → 点「保存草稿」（不点发表）。
+ * job: profileId, video, title（短标题）, body（可选）, topics（可选）, hotspot?, activity?, autoHotspot?, shotDir?
  */
 import path from 'node:path';
 import { humanPause, humanMouseClick, humanInsertText } from '../lib/pace.mjs';
 import { loadJob, abs } from '../lib/load_job.mjs';
-import { resolveShotDir, safeShot, evalAllRoots, normalizeTopics } from '../lib/ego_dom.mjs';
+import {
+  resolveShotDir,
+  safeShot,
+  evalAllRoots,
+  normalizeTopics,
+  deriveHotspotKeywords,
+  cleanSuggestLabel,
+  scoreCandidateMatch,
+} from '../lib/ego_dom.mjs';
 
 const { job } = loadJob();
 const videoPath = abs(job.video);
 const shortTitle = job.title;
 const postContent = job.body ? String(job.body).trim() : String(job.title || '').trim();
 const topics = normalizeTopics(job.topics);
+const autoHotspot = job.autoHotspot !== false;
+const hotspotKeywords = deriveHotspotKeywords(job);
 const shotDir = resolveShotDir(job);
 
 if (!videoPath || !shortTitle) throw new Error('job 需要 video + title');
@@ -177,13 +187,23 @@ try {
       await humanPause(200, 400);
     }
 
-    // Weixin Channels converts `#word + Space` into <span class="hl topic" data-type="topic"> (no dropdown).
+    // Prefer live topic suggestion item if popover appears; otherwise Space converts `#word ` to <span class="hl topic">.
     if (topics.length) {
       if (postContent) {
         await page.keyboard.press('Enter');
         await humanPause(200, 400);
       }
       for (const kw of topics) {
+        const beforeSpanCount = await evalAllRoots(page, (roots) => {
+          for (const { root } of roots) {
+            const ed = root.querySelector(
+              '.post-desc-box [contenteditable="true"], .input-editor, [contenteditable="true"]',
+            );
+            if (ed) return ed.querySelectorAll('span.hl.topic, span[data-type="topic"]').length;
+          }
+          return 0;
+        });
+
         const clickedTopicBtn = await evalAllRoots(page, (roots) => {
           for (const { root } of roots) {
             const btn = Array.from(root.querySelectorAll('div, button, span')).find(
@@ -197,14 +217,99 @@ try {
           return false;
         });
         if (!clickedTopicBtn) await page.keyboard.type('#');
-        await humanPause(300, 500);
+        await humanPause(280, 480);
         // Humanized key rhythm so topic conversion is not machine-uniform.
         await page.keyboard.type(kw, { delay: 35 + Math.floor(Math.random() * 55) });
-        await humanPause(250, 450);
-        await page.keyboard.type(' ');
+        await humanPause(550, 900);
+
+        const suggestItems = await evalAllRoots(page, (roots) => {
+          const out = [];
+          const sels = [
+            '[class*="topic-suggest"] [class*="item"]',
+            '[class*="suggest"] [class*="item"]',
+            '[class*="mention"] [class*="item"]',
+            '[class*="topic"] ul li',
+            '[class*="popover"] li',
+            '[role="option"]',
+          ];
+          for (const { name, root } of roots) {
+            const seen = new Set();
+            for (const sel of sels) {
+              for (const el of Array.from(root.querySelectorAll(sel))) {
+                if (seen.has(el) || el.closest('[contenteditable="true"]')) continue;
+                seen.add(el);
+                const r = el.getBoundingClientRect();
+                const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+                if (r.width <= 20 || r.height <= 14 || r.height > 72 || !t || t === '#话题') continue;
+                out.push({ root: name, text: t, idx: out.length });
+              }
+            }
+          }
+          return out.slice(0, 15);
+        });
+
+        let pickedSuggest = false;
+        if (suggestItems.length) {
+          const ranked = suggestItems
+            .map((it) => ({
+              ...it,
+              score: scoreCandidateMatch(cleanSuggestLabel(it.text), [kw, ...hotspotKeywords]),
+            }))
+            .filter((it) => it.score >= 350)
+            .sort((a, b) => b.score - a.score);
+          const pick = ranked[0];
+          if (pick) {
+            pickedSuggest = await evalAllRoots(
+              page,
+              (roots, targetText) => {
+                const sels = [
+                  '[class*="topic-suggest"] [class*="item"]',
+                  '[class*="suggest"] [class*="item"]',
+                  '[class*="mention"] [class*="item"]',
+                  '[class*="topic"] ul li',
+                  '[class*="popover"] li',
+                  '[role="option"]',
+                ];
+                for (const { root } of roots) {
+                  for (const sel of sels) {
+                    for (const el of Array.from(root.querySelectorAll(sel))) {
+                      if (el.closest('[contenteditable="true"]')) continue;
+                      const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+                      if (t === targetText && el.getBoundingClientRect().width > 0) {
+                        el.click();
+                        return true;
+                      }
+                    }
+                  }
+                }
+                return false;
+              },
+              pick.text,
+            );
+            if (pickedSuggest) {
+              console.log('WXCH_TOPIC_SUGGEST_PICKED:', pick.text);
+              await humanPause(250, 450);
+            }
+          }
+        }
+
+        const afterSpanCount = await evalAllRoots(page, (roots) => {
+          for (const { root } of roots) {
+            const ed = root.querySelector(
+              '.post-desc-box [contenteditable="true"], .input-editor, [contenteditable="true"]',
+            );
+            if (ed) return ed.querySelectorAll('span.hl.topic, span[data-type="topic"]').length;
+          }
+          return 0;
+        });
+
+        if (!pickedSuggest || afterSpanCount <= beforeSpanCount) {
+          await page.keyboard.type(' ');
+        }
         await humanPause(350, 650);
       }
-      const topicSpans = await evalAllRoots(page, (roots) => {
+
+      let topicSpans = await evalAllRoots(page, (roots) => {
         for (const { root } of roots) {
           const ed = root.querySelector(
             '.post-desc-box [contenteditable="true"], .input-editor, [contenteditable="true"]',
@@ -217,12 +322,113 @@ try {
       if (topicSpans < topics.length) {
         console.warn('[wxch] some topics stayed as plain text; check #话题 + Space conversion');
       }
+
+      if (autoHotspot && topicSpans < 5) {
+        const recTopics = await evalAllRoots(page, (roots) => {
+          const out = [];
+          for (const { root } of roots) {
+            const ed = root.querySelector('.post-desc-box [contenteditable="true"], .input-editor');
+            const box = ed?.closest('.post-desc-box') || ed?.parentElement?.parentElement;
+            if (!box) continue;
+            for (const el of Array.from(box.querySelectorAll('span, div, button, a'))) {
+              if (el.closest('[contenteditable="true"]') || el.childElementCount > 1) continue;
+              const t = (el.innerText || '').trim();
+              const r = el.getBoundingClientRect();
+              if (r.width > 0 && /^#[^\s]{2,16}$/.test(t) && t !== '#话题') {
+                out.push(t);
+              }
+            }
+          }
+          return [...new Set(out)].slice(0, 12);
+        });
+        const rankedRec = recTopics
+          .filter((t) => !topics.includes(t.replace(/^#/, '')))
+          .map((t) => ({ text: t, score: scoreCandidateMatch(t, hotspotKeywords, { includeGeneralHints: true }) }))
+          .filter((x) => x.score >= 100)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, Math.min(2, 5 - topicSpans));
+        for (const rItem of rankedRec) {
+          const clickedRec = await evalAllRoots(
+            page,
+            (roots, textTarget) => {
+              for (const { root } of roots) {
+                for (const el of Array.from(root.querySelectorAll('span, div, button, a'))) {
+                  if (el.closest('[contenteditable="true"]')) continue;
+                  if ((el.innerText || '').trim() === textTarget && el.getBoundingClientRect().width > 0) {
+                    el.click();
+                    return true;
+                  }
+                }
+              }
+              return false;
+            },
+            rItem.text,
+          );
+          if (clickedRec) {
+            console.log('WXCH_RECOMMEND_TOPIC_ADDED:', rItem.text);
+            await humanPause(300, 500);
+          }
+        }
+      }
     }
   } else {
     console.warn('[wxch] description editor not found; skipping body/topics');
   }
+
+  if (autoHotspot) {
+    try {
+      const activityCandidates = await evalAllRoots(page, (roots) => {
+        for (const { root } of roots) {
+          const lbl = Array.from(root.querySelectorAll('div, span, label')).find((el) => {
+            const t = (el.innerText || '').replace(/\s+/g, '').trim();
+            return /^(?:参加活动|参与活动|活动)$/.test(t) && el.childElementCount <= 1 && el.getBoundingClientRect().width > 0;
+          });
+          if (!lbl) continue;
+          let box = lbl.parentElement;
+          for (let d = 0; d < 3 && box; d++) {
+            const items = Array.from(box.querySelectorAll('div, span, button, li')).filter((el) => {
+              if (el === lbl || el.childElementCount > 2) return false;
+              const r = el.getBoundingClientRect();
+              const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+              return r.width > 24 && r.height > 16 && r.height < 52 && t && !/活动|选择|请选择|不参加/.test(t);
+            });
+            if (items.length) {
+              return items.slice(0, 12).map((el) => (el.innerText || '').replace(/\s+/g, ' ').trim());
+            }
+            box = box.parentElement;
+          }
+        }
+        return [];
+      });
+      const bestAct = activityCandidates
+        .map((t) => ({ text: t, score: scoreCandidateMatch(t, hotspotKeywords, { includeGeneralHints: true }) }))
+        .filter((x) => x.score >= 100)
+        .sort((a, b) => b.score - a.score)[0];
+      if (bestAct) {
+        await evalAllRoots(
+          page,
+          (roots, target) => {
+            for (const { root } of roots) {
+              const hit = Array.from(root.querySelectorAll('div, span, button, li')).find(
+                (el) => (el.innerText || '').replace(/\s+/g, ' ').trim() === target && el.getBoundingClientRect().width > 0,
+              );
+              if (hit) {
+                hit.click();
+                return true;
+              }
+            }
+            return false;
+          },
+          bestAct.text,
+        );
+        console.log('WXCH_ACTIVITY_ASSOCIATED:', bestAct.text);
+      }
+    } catch (e) {
+      console.warn('[wxch] activity probe note:', String(e?.message || e).slice(0, 100));
+    }
+  }
   await humanPause(1200, 2200, '正文话题后', 'wxch');
-  await safeShot(page, path.join(shotDir, 'channels_before_draft.png'));
+  await safeShot(page, path.join(shotDir, 'channels_before_draft.png'), { fullPage: true });
 
   // Wait until the real BUTTON「保存草稿」is enabled (not weui-desktop-btn_disabled).
   let saveBtnReady = null;

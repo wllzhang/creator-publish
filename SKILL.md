@@ -21,6 +21,8 @@ node runtime/run.mjs --platform <id> [profileId + platform fields] [mode?]
 | `profileId` | Ego profile id (required for browser platforms; unused for `wechat_mp`) |
 | `platform` | see `platforms/` |
 | `mode` | `draft` = stop before final publish; `submit` = confirm. Omit → platform `default_mode` |
+| `hotspot` / `activity` / `no-auto-hotspot` | Social platforms auto-associate platform hotspot/trending suggestions/activities by default from `topics` + `title`; pass `--hotspot`/`--activity` to override or `--no-auto-hotspot` to disable |
+| `shot-dir` | Optional directory for before/after draft proof screenshots |
 
 Fields per platform: [`platforms/`](platforms/). Summary:
 

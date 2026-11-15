@@ -2,7 +2,7 @@
 /**
  * Unified creator-publish entry.
  *
- *   node runtime/run.mjs --platform <id> [platform fields...]
+ *   node runtime/run.mjs --platform <id> [platform fields...] [--hotspot <kw>] [--activity <kw>] [--no-auto-hotspot] [--shot-dir <dir>]
  *
  * Routes:
  *   douyin | bilibili | weixin_channels | xiaohongshu  → write_job + Ego social
