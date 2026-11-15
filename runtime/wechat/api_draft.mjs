@@ -161,6 +161,7 @@ const htmlFile = path.resolve(need(args, 'html-file'));
 const cover = path.resolve(need(args, 'cover'));
 const out = path.resolve(args.out || 'api_draft_result.json');
 const digest = args.digest || '';
+const scheduleTime = args['schedule-time'] || args.schedule || null;
 
 if (!fs.existsSync(apiEnv)) {
   console.error('api-env not found:', apiEnv);
@@ -243,6 +244,7 @@ const result = {
   thumb_media_id: thumbMediaId,
   title,
   author,
+  scheduleTime,
   body_image_cdn: mapping,
   egress: 'api_draft.mjs',
 };

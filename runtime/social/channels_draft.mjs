@@ -14,6 +14,7 @@ import {
   deriveHotspotKeywords,
   cleanSuggestLabel,
   scoreCandidateMatch,
+  parseScheduleTime,
 } from '../lib/ego_dom.mjs';
 
 function toChannelsShortTitle(raw) {
@@ -31,6 +32,7 @@ const topics = normalizeTopics(job.topics);
 const autoHotspot = job.autoHotspot !== false;
 const hotspotKeywords = deriveHotspotKeywords(job);
 const shotDir = resolveShotDir(job);
+const schedule = parseScheduleTime(job.scheduleTime);
 
 if (!videoPath || !shortTitle) throw new Error('job 需要 video + title');
 
@@ -442,6 +444,15 @@ try {
     }
   }
   await humanPause(1200, 2200, '正文话题后', 'wxch');
+
+  if (schedule) {
+    console.log(`[wxch] 定时发布需求: ${schedule.dateTimeStr}`);
+    // 微信视频号平台限制：页面明确提示「使用定时发表将无法保存草稿。若要保存草稿，需先取消定时发表。」
+    // 且开启「定时」后平台自动禁用「保存草稿」按钮。
+    // 在草稿模式（mode: draft）下，严格遵守只入草稿箱安全红线，保持「不定时」以正常点击「保存草稿」，并在日志中明确记录预定时间。
+    console.warn(`[wxch] 平台限制：微信视频号选择「定时发表」将无法保存草稿。按安全红线暂存草稿箱，预定发表时间为: ${schedule.dateTimeStr}`);
+  }
+
   await safeShot(page, path.join(shotDir, 'channels_before_draft.png'), { fullPage: true });
 
   // Wait until the real BUTTON「保存草稿」is enabled (not weui-desktop-btn_disabled).

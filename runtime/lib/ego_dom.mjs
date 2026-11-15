@@ -193,3 +193,78 @@ export async function evalAllRoots(page, fn, arg) {
     { src: fn.toString(), a: arg },
   );
 }
+
+/**
+ * Parse colloquial, ISO, or standard date-time string into structured schedule info.
+ * Supports:
+ *   - "2026-11-17 11:30"
+ *   - "2026-11-17T11:30:00"
+ *   - "2026/11/17 11:30"
+ *   - "17日早上11.30", "17日11:30", "11月17日 11:30", "11-17 11:30"
+ * @param {string} raw
+ * @returns {{ year: number, month: number, day: number, hour: number, minute: number, dateStr: string, timeStr: string, dateTimeStr: string, timestamp: number } | null}
+ */
+export function parseScheduleTime(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  let year, month, day, hour, minute;
+  const now = new Date();
+
+  // Pattern 1: standard YYYY-MM-DD HH:mm(:ss)? or YYYY/MM/DD or with T
+  const mFull = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})[ T](\d{1,2})[:.](\d{1,2})(?::(\d{1,2}))?$/);
+  if (mFull) {
+    year = Number(mFull[1]);
+    month = Number(mFull[2]);
+    day = Number(mFull[3]);
+    hour = Number(mFull[4]);
+    minute = Number(mFull[5]);
+  } else {
+    // Pattern 2: Chinese or short format: e.g. "17日早上11.30", "11月17日 11:30", "11-17 11:30"
+    const mChinese = s.match(
+      /(?:(\d{4})[年/-])?(?:(\d{1,2})[月/-])?(\d{1,2})[日号]?[ \t]*(?:(早上|上午|下午|晚上|中午))?[ \t]*(\d{1,2})[:.点时](\d{1,2})/,
+    );
+    if (mChinese) {
+      year = mChinese[1] ? Number(mChinese[1]) : now.getFullYear();
+      month = mChinese[2] ? Number(mChinese[2]) : now.getMonth() + 1;
+      day = Number(mChinese[3]);
+      let h = Number(mChinese[5]);
+      const ampm = mChinese[4];
+      if ((ampm === '下午' || ampm === '晚上') && h < 12) h += 12;
+      if (ampm === '中午' && h < 11) h += 12;
+      hour = h;
+      minute = Number(mChinese[6]);
+    } else {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        year = d.getFullYear();
+        month = d.getMonth() + 1;
+        day = d.getDate();
+        hour = d.getHours();
+        minute = d.getMinutes();
+      } else {
+        throw new Error(`无法解析定时发布时间: "${raw}"`);
+      }
+    }
+  }
+
+  const pad = (n) => String(n).padStart(2, '0');
+  const dateStr = `${year}-${pad(month)}-${pad(day)}`;
+  const timeStr = `${pad(hour)}:${pad(minute)}`;
+  const dateTimeStr = `${dateStr} ${timeStr}`;
+  const timestamp = new Date(year, month - 1, day, hour, minute).getTime();
+
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    dateStr,
+    timeStr,
+    dateTimeStr,
+    timestamp,
+  };
+}
+

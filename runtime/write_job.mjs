@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs, need } from './lib/cli_args.mjs';
 import { tmpJoin } from './lib/ego_util.mjs';
+import { parseScheduleTime } from './lib/ego_dom.mjs';
 
 const PLATFORMS = new Set([
   'douyin', 'bilibili', 'weixin_channels', 'xiaohongshu', 'wechat_mp',
@@ -55,11 +56,15 @@ const autoHotspot = !(
   args['no-auto-hotspot'] === 'true' ||
   args['auto-hotspot'] === 'false'
 );
+const rawSchedule = args['schedule-time'] || args.schedule || null;
+const scheduleInfo = rawSchedule ? parseScheduleTime(rawSchedule) : null;
+const scheduleTime = scheduleInfo ? scheduleInfo.dateTimeStr : null;
 
 const job = {
   platform,
   mode,
   profileId,
+  scheduleTime,
   // video platforms
   video: absOrNull(args.video),
   title: args.title || null,

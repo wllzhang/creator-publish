@@ -13,6 +13,7 @@ import {
   deriveHotspotKeywords,
   cleanSuggestLabel,
   scoreCandidateMatch,
+  parseScheduleTime,
 } from '../lib/ego_dom.mjs';
 
 const { job } = loadJob();
@@ -24,6 +25,7 @@ const bodyText = job.body ? String(job.body).trim() : '';
 const autoHotspot = job.autoHotspot !== false;
 const hotspotKeywords = deriveHotspotKeywords(job);
 const shotDir = resolveShotDir(job);
+const schedule = parseScheduleTime(job.scheduleTime);
 
 if (!videoPath || !title) throw new Error('job 需要 video + title');
 if (rawTopics.length > 5) {
@@ -464,6 +466,45 @@ try {
       await associateDouyinHotspotAndActivity(page);
     } catch (e) {
       console.warn('[dy] hotspot/activity note:', String(e?.message || e).slice(0, 120));
+    }
+  }
+
+  if (schedule) {
+    try {
+      console.log(`[dy] 设置定时发布: ${schedule.dateTimeStr}`);
+      const clickedRadio = await page.evaluate(() => {
+        const hit = Array.from(document.querySelectorAll('label, div, span')).find((el) =>
+          (el.innerText || '').trim() === '定时发布',
+        );
+        if (!hit) return false;
+        const target = hit.closest('label, [class*="radio"]') || hit;
+        target.scrollIntoView({ block: 'center' });
+        target.click();
+        return true;
+      });
+      if (clickedRadio) {
+        await humanPause(600, 1000, '选择定时发布单选', 'dy');
+        const setRes = await page.evaluate((targetTime) => {
+          const inp = document.querySelector('input[placeholder="日期和时间"], input[placeholder*="日期"]');
+          if (!inp) return { found: false };
+          inp.focus();
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+          if (nativeSetter) nativeSetter.call(inp, targetTime);
+          else inp.value = targetTime;
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+          inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+          inp.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+          inp.blur();
+          return { found: true, val: inp.value };
+        }, schedule.dateTimeStr);
+        console.log('[dy] 定时发布设置结果:', JSON.stringify(setRes));
+        await humanPause(600, 1000, '完成定时发布输入', 'dy');
+      } else {
+        console.warn('[dy] 未找到「定时发布」单选框');
+      }
+    } catch (e) {
+      console.warn('[dy] 设置定时发布异常:', String(e?.message || e).slice(0, 120));
     }
   }
 

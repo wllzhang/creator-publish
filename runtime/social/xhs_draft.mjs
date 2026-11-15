@@ -12,6 +12,7 @@ import {
   deriveHotspotKeywords,
   cleanSuggestLabel,
   scoreCandidateMatch,
+  parseScheduleTime,
 } from '../lib/ego_dom.mjs';
 
 const { job } = loadJob();
@@ -22,6 +23,7 @@ const topicsList = normalizeTopics(job.topics);
 const autoHotspot = job.autoHotspot !== false;
 const hotspotKeywords = deriveHotspotKeywords(job);
 const shotDir = resolveShotDir(job);
+const schedule = parseScheduleTime(job.scheduleTime);
 
 let descHtml = '';
 if (!desc) {
@@ -356,6 +358,99 @@ try {
 
   await enableOriginalDeclaration();
   await humanPause(800, 1600, '原创声明后', 'xhs');
+
+  if (schedule) {
+    try {
+      console.log(`[xhs] 设置定时发布: ${schedule.dateTimeStr}`);
+      const switchRes = await page.evaluate(() => {
+        const card = Array.from(document.querySelectorAll('.custom-switch-card')).find((c) =>
+          /定时发布/.test(c.innerText || ''),
+        );
+        const sw = card?.querySelector('.d-switch');
+        if (!sw) return { ok: false, reason: 'no switch' };
+        const checked = sw.classList.contains('d-switch-checked') || sw.querySelector('input')?.checked;
+        if (!checked) sw.click();
+        return { ok: true, wasChecked: checked };
+      });
+      console.log('[xhs] 定时发布开关:', JSON.stringify(switchRes));
+      await humanPause(1000, 1600, '开启定时开关后', 'xhs');
+
+      const popOpen = await page.evaluate(() => {
+        const picker = document.querySelector('.date-picker-container');
+        if (!picker) return false;
+        picker.scrollIntoView({ block: 'center' });
+        picker.click();
+        return true;
+      });
+      if (popOpen) {
+        await humanPause(1000, 1600, '打开日期时间弹窗', 'xhs');
+
+        const dayRes = await page.evaluate((targetDay) => {
+          const pop = document.querySelector('.post-time-date-picker-popover-class');
+          if (!pop) return { ok: false, reason: 'no pop' };
+          const cells = Array.from(pop.querySelectorAll('.d-datepicker-cell:not(.disabled)'));
+          const hit = cells.find((c) => {
+            const span = c.querySelector('.d-text.d-text-monospace') || c;
+            return (span.innerText || '').trim() === String(targetDay);
+          });
+          if (hit) {
+            hit.click();
+            return { ok: true, text: hit.innerText.trim() };
+          }
+          return { ok: false, reason: 'day not found' };
+        }, schedule.day);
+        console.log('[xhs] 选择日期结果:', JSON.stringify(dayRes));
+        await humanPause(800, 1400, '选定日期后', 'xhs');
+
+        const hourRes = await page.evaluate((targetH) => {
+          const pop = document.querySelector('.post-time-date-picker-popover-class');
+          if (!pop) return { ok: false, reason: 'no pop' };
+          const timebars = Array.from(pop.querySelectorAll('.d-timepicker-timebar'));
+          const hourBar = timebars[0];
+          const hit = Array.from(hourBar?.querySelectorAll('.d-timepicker-time') || []).find((el) => {
+            const t = (el.innerText || '').replace(/\D/g, '');
+            return t === String(targetH) || t === String(targetH).padStart(2, '0');
+          });
+          if (hit) {
+            hit.scrollIntoView({ block: 'center' });
+            hit.click();
+            return { ok: true, text: hit.innerText.trim() };
+          }
+          return { ok: false, reason: 'hour not found' };
+        }, schedule.hour);
+        console.log('[xhs] 选择小时结果:', JSON.stringify(hourRes));
+        await humanPause(800, 1400, '选定小时后', 'xhs');
+
+        const minRes = await page.evaluate((targetM) => {
+          const pop = document.querySelector('.post-time-date-picker-popover-class');
+          if (!pop) return { ok: false, reason: 'no pop' };
+          const timebars = Array.from(pop.querySelectorAll('.d-timepicker-timebar'));
+          const minBar = timebars[1];
+          const hit = Array.from(minBar?.querySelectorAll('.d-timepicker-time') || []).find((el) => {
+            const t = (el.innerText || '').replace(/\D/g, '');
+            return t === String(targetM) || t === String(targetM).padStart(2, '0');
+          });
+          if (hit) {
+            hit.scrollIntoView({ block: 'center' });
+            hit.click();
+            return { ok: true, text: hit.innerText.trim() };
+          }
+          return { ok: false, reason: 'min not found' };
+        }, schedule.minute);
+        console.log('[xhs] 选择分钟结果:', JSON.stringify(minRes));
+        await humanPause(800, 1400, '选定分钟后', 'xhs');
+
+        await page.evaluate(() => {
+          const titleInp = document.querySelector('input[placeholder*="填写标题"]');
+          titleInp?.click();
+        });
+        await humanPause(600, 1000, '关闭日期弹层', 'xhs');
+      }
+    } catch (e) {
+      console.warn('[xhs] 设置定时发布异常:', String(e?.message || e).slice(0, 120));
+    }
+  }
+
   await safeShot(page, path.join(shotDir, 'xhs_before_draft.png'), { fullPage: true });
 
   await humanPause(3000, 6000, '点暂存前', 'xhs');

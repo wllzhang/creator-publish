@@ -113,7 +113,7 @@ function shellQuote(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
-function buildApiArgs({ apiEnv, title, htmlFile, cover, bodyImages, digest, author, out }) {
+function buildApiArgs({ apiEnv, title, htmlFile, cover, bodyImages, digest, author, scheduleTime, out }) {
   const args = [
     API_DRAFT,
     '--api-env', apiEnv,
@@ -125,6 +125,7 @@ function buildApiArgs({ apiEnv, title, htmlFile, cover, bodyImages, digest, auth
   if (bodyImages.length) args.push('--body-images', bodyImages.join(','));
   if (digest) args.push('--digest', digest);
   if (author) args.push('--author', author);
+  if (scheduleTime) args.push('--schedule-time', scheduleTime);
   return args;
 }
 
@@ -183,7 +184,8 @@ function runSshEgress({
       ` --out ${remoteOut}` +
       (remoteBody.length ? ` --body-images ${shellQuote(remoteBody.join(','))}` : '') +
       (digest ? ` --digest ${shellQuote(digest)}` : '') +
-      (author ? ` --author ${shellQuote(author)}` : ''),
+      (author ? ` --author ${shellQuote(author)}` : '') +
+      (scheduleTime ? ` --schedule-time ${shellQuote(scheduleTime)}` : ''),
     `ec=$?`,
     `shred -u ${remoteBase}/secrets/wechat_mp.env 2>/dev/null || rm -f ${remoteBase}/secrets/wechat_mp.env`,
     `exit $ec`,
@@ -260,6 +262,7 @@ const common = {
   bodyImages,
   digest: args.digest || '',
   author: args.author || fileEnv.WECHAT_MP_AUTHOR || '',
+  scheduleTime: args['schedule-time'] || args.schedule || '',
   out,
   egressNote: resolved.source,
   expectIp,

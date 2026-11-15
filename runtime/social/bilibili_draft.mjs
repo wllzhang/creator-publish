@@ -14,6 +14,7 @@ import {
   normalizeTopics,
   deriveHotspotKeywords,
   scoreCandidateMatch,
+  parseScheduleTime,
 } from '../lib/ego_dom.mjs';
 
 function ensureCoverFile(videoFile, explicitCover) {
@@ -52,6 +53,7 @@ const allTags = normalizeTopics(job.topics);
 const tags = autoHotspot && allTags.length > 8 ? allTags.slice(0, 8) : allTags.slice(0, 10);
 const hotspotKeywords = deriveHotspotKeywords(job);
 const shotDir = resolveShotDir(job);
+const schedule = parseScheduleTime(job.scheduleTime);
 if (!videoPath || !title) throw new Error('job 需要 video + title');
 
 async function clearExistingTags(page) {
@@ -596,6 +598,94 @@ try {
       await associateBilibiliActivityTopic(page);
     } catch (e) {
       console.warn('[bili] 参与话题 note:', String(e?.message || e).slice(0, 120));
+    }
+  }
+
+  if (schedule) {
+    try {
+      console.log(`[bili] 设置定时发布: ${schedule.dateTimeStr}`);
+      const switchRes = await page.evaluate(() => {
+        const sw = document.querySelector('.time-container .switch-container');
+        if (!sw) return { ok: false, reason: 'no switch' };
+        sw.scrollIntoView({ block: 'center' });
+        const isActive = /\b(on|active|checked)\b/.test(sw.className) || sw.className.includes('switch-container-active');
+        if (!isActive) sw.click();
+        return { ok: true, wasActive: isActive };
+      });
+      console.log('[bili] 定时开关:', JSON.stringify(switchRes));
+      await humanPause(800, 1400, '开启定时开关后', 'bili');
+
+      const dateOpen = await page.evaluate(() => {
+        const btn = document.querySelector('.date-picker-date');
+        if (!btn) return false;
+        btn.scrollIntoView({ block: 'center' });
+        btn.click();
+        return true;
+      });
+      if (dateOpen) {
+        await humanPause(600, 1000, '打开日期面板', 'bili');
+        const dayRes = await page.evaluate((targetDay) => {
+          const cells = Array.from(document.querySelectorAll('.date-picker-container .date-wrp > div, .date-picker-container .date-wrp span, .date-picker-container [class*="date-item"], .date-picker-container li'));
+          const hit = cells.find(c => (c.innerText || '').trim() === String(targetDay) && !c.className.includes('disabled') && !c.className.includes('prev') && !c.className.includes('next'));
+          if (hit) {
+            hit.click();
+            return { ok: true, text: hit.innerText.trim() };
+          }
+          const hit2 = Array.from(document.querySelectorAll('.date-picker-container *')).find(c => c.children.length === 0 && (c.innerText || '').trim() === String(targetDay) && !c.className.includes('disabled'));
+          if (hit2) {
+            hit2.click();
+            return { ok: true, fallback: true, text: hit2.innerText.trim() };
+          }
+          return { ok: false };
+        }, schedule.day);
+        console.log('[bili] 选择日期结果:', JSON.stringify(dayRes));
+        await humanPause(600, 1000, '选定日期后', 'bili');
+      }
+
+      const timeOpen = await page.evaluate(() => {
+        const btn = document.querySelector('.date-picker-timer');
+        if (!btn) return false;
+        btn.scrollIntoView({ block: 'center' });
+        btn.click();
+        return true;
+      });
+      if (timeOpen) {
+        await humanPause(600, 1000, '打开时间面板', 'bili');
+        const timeRes = await page.evaluate((targetHour, targetMin) => {
+          const cols = Array.from(document.querySelectorAll('.time-picker-panel-select-wrp, .time-picker-body-wrp ul, .time-picker-body-wrp > div'));
+          const hourCol = cols[0];
+          const minCol = cols[1];
+          let hourHit = null;
+          let minHit = null;
+          if (hourCol) {
+            const hours = Array.from(hourCol.querySelectorAll('li, div, span')).filter(el => (el.innerText || '').trim() === String(targetHour) || (el.innerText || '').trim() === String(targetHour).padStart(2, '0'));
+            hourHit = hours[0];
+            hourHit?.click();
+          }
+          if (minCol) {
+            const mins = Array.from(minCol.querySelectorAll('li, div, span')).filter(el => (el.innerText || '').trim() === String(targetMin) || (el.innerText || '').trim() === String(targetMin).padStart(2, '0'));
+            minHit = mins[0];
+            minHit?.click();
+          }
+          return {
+            hourOk: !!hourHit,
+            minOk: !!minHit,
+            hourText: hourHit?.innerText?.trim(),
+            minText: minHit?.innerText?.trim()
+          };
+        }, schedule.hour, schedule.minute);
+        console.log('[bili] 选择时间结果:', JSON.stringify(timeRes));
+        await humanPause(600, 1000, '选定时间后', 'bili');
+      }
+
+      await page.evaluate(() => {
+        const titleInp = document.querySelector('input[placeholder="请输入稿件标题"]');
+        titleInp?.scrollIntoView({ block: 'center' });
+        titleInp?.click();
+      });
+      await humanPause(500, 800, '关闭时间下拉', 'bili');
+    } catch (e) {
+      console.warn('[bili] 设置定时发布异常:', String(e?.message || e).slice(0, 120));
     }
   }
 
