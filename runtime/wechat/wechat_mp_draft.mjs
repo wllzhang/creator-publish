@@ -144,7 +144,7 @@ function runLocalNode(common) {
 }
 
 function runSshEgress({
-  host, apiEnv, title, htmlFile, cover, bodyImages, digest, author, out, egressNote, expectIp,
+  host, apiEnv, title, htmlFile, cover, bodyImages, digest, author, scheduleTime, out, egressNote, expectIp,
 }) {
   const stamp = Date.now().toString(16);
   const remoteBase = `/tmp/creator_publish_wechat_${stamp}`;
