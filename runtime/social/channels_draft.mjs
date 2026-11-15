@@ -556,17 +556,18 @@ try {
       .goto('https://channels.weixin.qq.com/platform/post/draftListManager', { waitUntil: 'load' })
       .catch(() => {});
     await humanPause(2500, 3800, '核验草稿箱', 'wxch');
+    const listNeedle = (postContent || shortTitle).replace(/\s+/g, ' ').trim().slice(0, 16);
     const inList = await evalAllRoots(
       page,
-      (roots, expectTitle) => {
+      (roots, needles) => {
         const text = roots.map((r) => r.root.body?.innerText || r.root.textContent || '').join('\n');
-        return Boolean(expectTitle && text.includes(expectTitle));
+        return needles.some((n) => n && text.includes(n));
       },
-      shortTitle,
+      [shortTitle, listNeedle],
     );
     if (inList) {
       saved = true;
-      console.log('WEIXIN_CHANNELS_DRAFT_VERIFIED_IN_LIST:', shortTitle);
+      console.log('WEIXIN_CHANNELS_DRAFT_VERIFIED_IN_LIST:', listNeedle || shortTitle);
     }
   }
 
