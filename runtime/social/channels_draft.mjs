@@ -110,7 +110,7 @@ async function waitUploadDone(timeoutMs = 180000) {
         const text = (root.body?.innerText || root.textContent || '').replace(/\s+/g, ' ');
         const videos = root.querySelectorAll('video').length;
         const hasEditor = !!root.querySelector('.input-editor, [contenteditable="true"]');
-        const uploading = /上传中|正在上传|处理中|转码中|\d+\s*%/.test(text);
+        const uploading = /上传中|正在上传|处理中|转码中|生成中|裁剪中|校验中|\d+\s*%/.test(text);
         const ready = (videos > 0 || /删除视频|更换视频|编辑封面|删除/.test(text)) && hasEditor;
         if (ready) return { root: name, videos, uploading, ready, snippet: text.slice(0, 120) };
       }
@@ -120,7 +120,7 @@ async function waitUploadDone(timeoutMs = 180000) {
       console.log('upload wait', st);
     }
     lastReady = !!st.ready;
-    if (st.ready && !st.uploading && ticks >= 2) return st;
+    if (st.ready && !st.uploading && ticks >= 4) return st;
     ticks++;
     await new Promise((r) => setTimeout(r, 2000));
   }
@@ -502,39 +502,79 @@ try {
   });
 
   let saved = false;
-  for (let w = 0; w < 25; w++) {
-    await humanPause(500, 900);
+  let lastErr = '';
+  for (let w = 0; w < 20; w++) {
+    await humanPause(600, 1000);
     const state = await evalAllRoots(
       page,
       (roots, expectTitle) => {
-        const chunks = roots.map((r) => r.root.body?.innerText || r.root.textContent || '');
-        const text = chunks.join('\n').slice(0, 12000);
+        const toastNodes = [];
+        for (const { root } of roots) {
+          for (const el of Array.from(
+            root.querySelectorAll('[class*="toast"], [class*="message"], [class*="tips"], .weui-desktop-tips'),
+          )) {
+            const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+            if (t && el.getBoundingClientRect().height > 0) toastNodes.push(t);
+          }
+        }
+        const toast = toastNodes.join(' | ');
         const href = location.href || '';
-        const toastOk = /草稿.*成功|保存成功|已保存|成功保存/.test(text);
+        const text = roots.map((r) => r.root.body?.innerText || r.root.textContent || '').join('\n').slice(0, 12000);
+        const hasErr = /不成功|失败|超过\d+字|限制/.test(toast);
+        const toastOk = !hasErr && /草稿.*成功|保存成功|已保存至草稿|成功保存/.test(toast);
         const leftCreate = /draftListManager|草稿箱/.test(href) || !/post\/create/.test(href);
         const titleSeen = expectTitle && text.includes(expectTitle);
-        return {
-          toastOk,
-          leftCreate,
-          titleSeen,
-          href,
-          hit: (text.match(/已保存|保存成功|草稿箱\s*\(\d+\)/) || [])[0] || '',
-        };
+        return { toast, hasErr, toastOk, leftCreate, titleSeen, href };
       },
       shortTitle,
     );
-    if (state.toastOk || state.hit || (state.leftCreate && state.titleSeen)) {
+    if (state.hasErr) {
+      lastErr = state.toast;
+      console.warn('WEIXIN_CHANNELS_SAVE_WARNING:', state.toast);
+      if (w === 3) {
+        await humanPause(3000, 4500);
+        await evalAllRoots(page, (roots) => {
+          const compact = (el) => (el.innerText || '').replace(/\s+/g, '').trim();
+          for (const { root } of roots) {
+            const btn = Array.from(root.querySelectorAll('button')).find((el) => compact(el) === '保存草稿');
+            btn?.click();
+          }
+        });
+      }
+      continue;
+    }
+    if (state.toastOk || (state.leftCreate && state.titleSeen)) {
       saved = true;
       console.log('WEIXIN_CHANNELS_DRAFT_SAVED', JSON.stringify(state));
       break;
     }
   }
 
+  // Always verify in 视频号草稿箱列表页 if still on create page
+  if (!/draftListManager/.test(await page.url())) {
+    await page
+      .goto('https://channels.weixin.qq.com/platform/post/draftListManager', { waitUntil: 'load' })
+      .catch(() => {});
+    await humanPause(2500, 3800, '核验草稿箱', 'wxch');
+    const inList = await evalAllRoots(
+      page,
+      (roots, expectTitle) => {
+        const text = roots.map((r) => r.root.body?.innerText || r.root.textContent || '').join('\n');
+        return Boolean(expectTitle && text.includes(expectTitle));
+      },
+      shortTitle,
+    );
+    if (inList) {
+      saved = true;
+      console.log('WEIXIN_CHANNELS_DRAFT_VERIFIED_IN_LIST:', shortTitle);
+    }
+  }
+
   await safeShot(page, path.join(shotDir, 'channels_after_draft.png'));
-  console.log(saved ? 'WEIXIN_CHANNELS_DRAFT_DONE' : 'WEIXIN_CHANNELS_DRAFT_CLICKED_CHECK_LIST');
+  console.log(saved ? 'WEIXIN_CHANNELS_DRAFT_DONE' : 'WEIXIN_CHANNELS_DRAFT_UNCONFIRMED');
   console.log('spaceId', task.spaceId);
   if (!saved) {
-    console.warn('draft toast/list not confirmed; verify in 视频号后台 draftListManager');
+    throw new Error(`WEIXIN_CHANNELS_DRAFT_NOT_SAVED: ${lastErr || 'not found in draftListManager'}`);
   }
 } finally {
   await task.finish({ keep: [] });
