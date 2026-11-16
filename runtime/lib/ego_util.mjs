@@ -50,7 +50,6 @@ export function runEgoMjs(mjsPath, { timeoutMs = 600_000, missingCode = 3, missi
     console.error('mjs not found:', abs);
     return 2;
   }
-  const fileUrl = pathToFileURL(abs).href;
   const inject = { ...env };
   // Also forward creator-publish keys already on process.env
   for (const k of Object.keys(process.env)) {
@@ -58,14 +57,31 @@ export function runEgoMjs(mjsPath, { timeoutMs = 600_000, missingCode = 3, missi
   }
   const prelude = Object.entries(inject)
     .filter(([, v]) => v != null && v !== '')
-    .map(([k, v]) => `process.env[${JSON.stringify(k)}]=${JSON.stringify(String(v))};`)
-    .join('');
-  const expr = `${prelude}await import(${JSON.stringify(fileUrl)})`;
+    .map(([k, v]) => `process.env[${JSON.stringify(k)}] = ${JSON.stringify(String(v).replace(/\\/g, '/'))};`)
+    .join('\n');
+
+  const runnerPath = path.join(path.dirname(abs), `.ego-runner-${Date.now()}.mjs`);
+  const targetUrl = pathToFileURL(abs).href;
+  const runnerContent = `${prelude}\nawait import(${JSON.stringify(targetUrl)});\n`;
+  fs.writeFileSync(runnerPath, runnerContent, 'utf8');
+
+  const runnerUrl = pathToFileURL(runnerPath).href;
+  const expr = `await import('${runnerUrl}')`;
+
   const r = spawnSync(exe, ['nodejs', '-e', expr], {
     env: scrubbedEnv(env || {}),
     timeout: timeoutMs,
-    stdio: 'inherit',
+    stdio: 'pipe',
+    encoding: 'utf8',
   });
+
+  if (r.stdout) process.stdout.write(r.stdout);
+  if (r.stderr) process.stderr.write(r.stderr);
+
+  try {
+    fs.unlinkSync(runnerPath);
+  } catch {}
+
   if (r.error) {
     console.error(r.error.message);
     return 1;

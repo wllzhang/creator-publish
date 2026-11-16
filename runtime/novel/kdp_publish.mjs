@@ -41,7 +41,7 @@ const keywords = String(args.keywords || '')
   .filter(Boolean);
 
 const cfg = {
-  space_name: `kdp-pub-${Math.abs(hashCode(epub + title)) % 100000}`,
+  space_name: `kdp-pub-${Date.now()}`,
   profileId,
   profile_id: profileId,
   title,
