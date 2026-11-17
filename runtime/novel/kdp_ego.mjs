@@ -232,17 +232,40 @@ async function executePublish() {
 
   await sleep(1500);
 
-  // 4. Keywords
+  // 4. Keywords (自动清洗 KDP 静默拦截的官方品牌词/受限词)
+  const KDP_FORBIDDEN_KW = [
+    /\bkindle\s+unlimited\b/gi,
+    /\bshort\s+reads\b/gi,
+    /\bkindle\b/gi,
+    /\bamazon\b/gi,
+    /\bkdp\b/gi,
+    /\baudible\b/gi,
+    /\bbestsell(?:er|ing)\b/gi,
+    /\bbest\s+seller\b/gi,
+    /\bfree\b/gi,
+  ];
+  const cleanKeywords = (cfg.keywords || []).map((raw) => {
+    let s = String(raw || "");
+    for (const re of KDP_FORBIDDEN_KW) {
+      if (re.test(s)) {
+        console.warn(`   [WARN] 清洗 KDP 受限关键词片段: "${s}" (匹配 ${re})`);
+        s = s.replace(re, " ");
+      }
+    }
+    return s.replace(/\s+/g, " ").trim().slice(0, 50);
+  });
+
   await page.evaluate((keywords) => {
+    const forbiddenRe = /\b(kindle\s+unlimited|short\s+reads|kindle|amazon|kdp|audible|bestsell(?:er|ing)|best\s+seller|free)\b/i;
     for (let i = 0; i < 7; i++) {
       const inp = document.getElementById(`data-keywords-${i}`);
-      if (inp && keywords[i] && !inp.value) {
+      if (inp && keywords[i] && (!inp.value || forbiddenRe.test(inp.value))) {
         inp.value = keywords[i];
         inp.dispatchEvent(new Event("input", { bubbles: true }));
         inp.dispatchEvent(new Event("change", { bubbles: true }));
       }
     }
-  }, cfg.keywords);
+  }, cleanKeywords);
 
   await sleep(1000);
 
@@ -410,25 +433,32 @@ async function executePublish() {
   }
   await sleep(2000);
 
+  // 始终强制激活 "Upload a cover you already have" 面板并锁定 data[cover_choice]="upload"
+  // 防止默认停留在 cover-creator 导致终审返回空 saveError
+  await page.evaluate(() => {
+    const uploadRow = document.querySelector('[data-a-accordion-row-name="upload"]');
+    if (uploadRow && !uploadRow.classList.contains('a-accordion-active')) {
+      const link = uploadRow.querySelector('a.a-accordion-row, a, input[type="radio"]') || uploadRow;
+      link.scrollIntoView({ block: 'center' });
+      link.click();
+    }
+    const hiddenCover = document.querySelector('input[name="data[cover_choice]"]');
+    if (hiddenCover && hiddenCover.value !== 'upload') {
+      hiddenCover.value = 'upload';
+      hiddenCover.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  await sleep(1500);
+
   if (cfg.cover_file && !uploadStatus.coverDone) {
     try {
-      console.log("   -> 展开封面上传区并上传封面:", cfg.cover_file);
-      await page.evaluate(() => {
-        const uploadAccordion = document.querySelector('[data-a-accordion-row-name="upload"]') ||
-                                Array.from(document.querySelectorAll('.a-accordion-row, a, button, span, label'))
-                                     .find(r => r.innerText?.includes('Upload a cover you already have'));
-        if (uploadAccordion) {
-          uploadAccordion.scrollIntoView({ block: 'center' });
-          uploadAccordion.click();
-        }
-      });
-      await sleep(3000);
+      console.log("   -> 上传自定义封面:", cfg.cover_file);
       await page.setInputFiles("#data-assets-cover-file-upload-AjaxInput", cfg.cover_file);
     } catch (e) {
       console.warn("   封面上传警告:", e.message);
     }
   } else {
-    console.log("   -> 封面已就绪，跳过重新上传。");
+    console.log("   -> 封面已就绪，已确认 data[cover_choice]=upload，跳过重新上传。");
   }
   await sleep(3000);
 
