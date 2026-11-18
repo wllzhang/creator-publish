@@ -319,23 +319,7 @@ async function associateDouyinHotspotAndActivity(page) {
   }
 }
 
-const task = await taskSpace('cp-douyin-' + Date.now(), { profileId: job.profileId });
-const page = task.page('p1');
-
-try {
-  console.log('Navigating Douyin upload...');
-  await page.goto('https://creator.douyin.com/creator-micro/content/upload', { waitUntil: 'load' });
-  await humanPause(2500, 4500, '上传页加载', 'dy');
-
-  const curUrl = await page.url();
-  console.log('Douyin URL:', curUrl);
-  if (curUrl.includes('login') || curUrl.includes('passport')) {
-    console.log('NEED_LOGIN_DOUYIN');
-    console.log(await page.snapshot());
-    throw new Error('NEED_LOGIN_DOUYIN');
-  }
-
-  // Dismiss stale resume draft banner if present so fresh upload starts clean
+async function dismissResumeBanner(page) {
   const dismissedBanner = await page.evaluate(() => {
     const body = document.body?.innerText || '';
     if (!/上次未发布的视频/.test(body)) return false;
@@ -359,40 +343,151 @@ try {
     });
     await humanPause(800, 1300);
   }
+}
 
-  await humanPause(1200, 2800, '选视频前', 'dy');
-  await page.setInputFiles('input[type="file"]', videoPath);
+async function uploadDouyinVideoWithRetry(page, filePath) {
+  const maxAttempts = Number(process.env.DOUYIN_UPLOAD_RETRIES || 3);
+  const uploadTimeoutMs = Number(process.env.DOUYIN_UPLOAD_TIMEOUT_MS || 600_000);
 
-  let waited = 0;
-  while (waited < 120000) {
-    const url = await page.url();
-    if (url.includes('/content/publish') || url.includes('/content/post/video')) {
-      console.log('publish page:', url);
-      break;
+  let lastReason = 'unknown';
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      console.warn(`[dy] 上传重试第 ${attempt}/${maxAttempts} 次（上次原因: ${lastReason}）...`);
+      await page.goto('https://creator.douyin.com/creator-micro/content/upload', { waitUntil: 'load' }).catch(() => {});
+      await humanPause(2500, 4200, '重试上传页加载', 'dy');
     }
-    await new Promise((r) => setTimeout(r, 1500));
-    waited += 1500;
+
+    await dismissResumeBanner(page);
+
+    // Wait for a mounted video file input before setInputFiles
+    let inputReady = false;
+    for (let i = 0; i < 20; i++) {
+      inputReady = await page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+        const vid = inputs.find((inp) => /video|\.mp4/i.test(inp.accept || '')) || inputs[0];
+        if (!vid) return false;
+        vid.id = 'dy-video-upload-target';
+        return true;
+      });
+      if (inputReady) break;
+      await new Promise((r) => setTimeout(r, 800));
+    }
+    if (!inputReady) {
+      lastReason = 'file input not found on upload page';
+      continue;
+    }
+
+    await humanPause(1000, 2200, '选视频前', 'dy');
+    await page.setInputFiles('#dy-video-upload-target', filePath);
+
+    // Wait for transition to publish/post page or upload start (max 45s)
+    let enteredPost = false;
+    for (let w = 0; w < 30; w++) {
+      const st = await page.evaluate(() => {
+        const url = location.href;
+        const body = document.body?.innerText || '';
+        const onPost = url.includes('/content/publish') || url.includes('/content/post/video');
+        const hasTitle = !!document.querySelector('input[placeholder*="填写作品标题"]');
+        const failed = /上传失败|上传异常|网络错误|格式不支持|文件损坏/.test(body);
+        return { url, onPost, hasTitle, failed };
+      });
+      if (st.failed) {
+        lastReason = 'upload failed immediately after file selection';
+        break;
+      }
+      if (st.onPost || st.hasTitle) {
+        console.log('publish page:', st.url);
+        enteredPost = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    if (!enteredPost) {
+      if (lastReason === 'unknown') lastReason = 'did not enter publish page after setInputFiles';
+      continue;
+    }
+
+    // Wait for TRUE 100% upload completion & title input ready
+    const startMs = Date.now();
+    let ticks = 0;
+    let settledTicks = 0;
+    let uploadSucceeded = false;
+    let uploadFailed = false;
+
+    while (Date.now() - startMs < uploadTimeoutMs) {
+      const st = await page.evaluate(() => {
+        const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+        const hasTitle = !!document.querySelector('input[placeholder*="填写作品标题"]');
+        const failed = /上传失败|上传异常|上传中断|网络异常|网络错误|转码失败/.test(body);
+        const pctMatch = body.match(/(?:已上传|上传中|正在上传)[^\d%]{0,8}(\d{1,3})\s*%/) || body.match(/\b(\d{1,2})\s*%/);
+        const pct = pctMatch ? Number(pctMatch[1]) : null;
+        const hasCancel = /取消上传/.test(body);
+        const uploading =
+          !failed &&
+          (hasCancel ||
+            /上传中|正在上传|上传过程中|等待上传|校验中|转码中|视频处理中/.test(body) ||
+            (pct !== null && pct < 100));
+        const doneSignal =
+          /上传成功|重新上传|更换视频/.test(body) ||
+          Array.from(document.querySelectorAll('video')).some((v) => v.readyState >= 1 || !!(v.currentSrc || v.src));
+        return { hasTitle, failed, uploading, pct, doneSignal };
+      });
+
+      if (st.failed) {
+        console.warn('[dy] 检测到视频上传失败状态:', JSON.stringify(st));
+        lastReason = 'douyin reported upload failure';
+        uploadFailed = true;
+        break;
+      }
+
+      if (ticks % 5 === 0 || st.uploading) {
+        console.log('[dy] upload wait', Math.round((Date.now() - startMs) / 1000) + 's', JSON.stringify(st));
+      }
+
+      if (st.hasTitle && !st.uploading) {
+        settledTicks++;
+        if (st.doneSignal || settledTicks >= 3) {
+          uploadSucceeded = true;
+          break;
+        }
+      } else {
+        settledTicks = 0;
+      }
+
+      ticks++;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+
+    if (uploadSucceeded) {
+      console.log('[dy] DOUYIN_UPLOAD_COMPLETE');
+      return;
+    }
+    if (!uploadFailed) {
+      lastReason = `upload timeout after ${Math.round(uploadTimeoutMs / 1000)}s`;
+    }
   }
 
-  // Wait for 100% upload completion & title input ready (max 120s)
-  let formReady = false;
-  for (let i = 0; i < 80; i++) {
-    const st = await page.evaluate(() => {
-      const body = document.body?.innerText || '';
-      const uploading =
-        (/上传中|正在上传|上传过程中|取消上传|已上传/.test(body) || /\b\d{1,2}\s*%/.test(body)) &&
-        !body.includes('重新上传');
-      const hasTitle = !!document.querySelector('input[placeholder*="填写作品标题"]');
-      return { uploading, hasTitle };
-    });
-    if (st.hasTitle && !st.uploading) {
-      formReady = true;
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 1500));
+  throw new Error(`DOUYIN_UPLOAD_FAILED: ${lastReason}`);
+}
+
+const task = await taskSpace('cp-douyin-' + Date.now(), { profileId: job.profileId });
+const page = task.page('p1');
+
+try {
+  console.log('Navigating Douyin upload...');
+  await page.goto('https://creator.douyin.com/creator-micro/content/upload', { waitUntil: 'load' });
+  await humanPause(2500, 4500, '上传页加载', 'dy');
+
+  const curUrl = await page.url();
+  console.log('Douyin URL:', curUrl);
+  if (curUrl.includes('login') || curUrl.includes('passport')) {
+    console.log('NEED_LOGIN_DOUYIN');
+    console.log(await page.snapshot());
+    throw new Error('NEED_LOGIN_DOUYIN');
   }
-  if (!formReady) console.warn('[dy] title input / upload settle not confirmed; continuing');
-  await humanPause(3000, 5000, '上传处理', 'dy');
+
+  await uploadDouyinVideoWithRetry(page, videoPath);
+  await humanPause(2500, 4000, '上传处理', 'dy');
 
   await page.fill('input[placeholder*="填写作品标题"]', title);
   await humanPause(800, 1800, '标题后', 'dy');
@@ -505,6 +600,26 @@ try {
       }
     } catch (e) {
       console.warn('[dy] 设置定时发布异常:', String(e?.message || e).slice(0, 120));
+    }
+  }
+
+  // Guard: never click 暂存离开 if video upload unexpectedly failed or is still in progress
+  const preSaveHealth = await page.evaluate(() => {
+    const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+    return {
+      failed: /上传失败|上传异常|上传中断|转码失败/.test(body),
+      uploading: /取消上传|正在上传|上传中/.test(body),
+    };
+  });
+  if (preSaveHealth.failed) {
+    throw new Error('DOUYIN_UPLOAD_FAILED_BEFORE_STASH');
+  }
+  if (preSaveHealth.uploading) {
+    console.warn('[dy] 暂存前检测到仍在上传，追加等待完成...');
+    for (let k = 0; k < 60; k++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const still = await page.evaluate(() => /取消上传|正在上传|上传中/.test(document.body?.innerText || ''));
+      if (!still) break;
     }
   }
 

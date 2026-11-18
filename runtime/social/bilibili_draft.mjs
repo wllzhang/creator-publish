@@ -74,8 +74,8 @@ const coverPath = job.cover ? abs(job.cover) : null;
 const title = job.title;
 const autoHotspot = job.autoHotspot !== false;
 const allTags = normalizeTopics(job.topics);
-// Leave 2 slots when autoHotspot is on so B站 live 推荐标签 can fill in.
-const tags = autoHotspot && allTags.length > 8 ? allTags.slice(0, 8) : allTags.slice(0, 10);
+// Use up to 10 explicit tags directly; if < 10 and autoHotspot is on, recommended tags top up remaining slots to 10.
+const tags = allTags.slice(0, 10);
 const hotspotKeywords = deriveHotspotKeywords(job);
 const shotDir = resolveShotDir(job);
 const schedule = parseScheduleTime(job.scheduleTime);
@@ -108,7 +108,8 @@ async function addBilibiliRecommendedTags(page) {
     const recLbl = Array.from(document.querySelectorAll('div, span, p')).find(
       (el) => el.childElementCount === 0 && /^推荐标签[:：]?$/.test((el.innerText || '').trim()),
     );
-    const row = recLbl?.parentElement || document;
+    if (!recLbl) return { existing, remain: 0, pills: [] };
+    const row = recLbl.parentElement;
     const pills = Array.from(row.querySelectorAll('div, span, button'))
       .filter((el) => {
         if (el === recLbl || el.childElementCount > 1) return false;
@@ -162,7 +163,7 @@ async function addBilibiliRecommendedTags(page) {
 
   const picked = [];
   const pickedSet = new Set();
-  const limit = Math.min(info.remain, 3);
+  const limit = info.remain;
   for (const pill of ranked) {
     if (picked.length >= limit) break;
     const key = pill.text.toLowerCase();
@@ -394,37 +395,61 @@ try {
     throw new Error('NEED_LOGIN_BILIBILI');
   }
 
-  for (let i = 0; i < 30; i++) {
-    const ok = await page.evaluate(() => {
-      const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter(
-        (inp) => (inp.accept || '').includes('.mp4') || (inp.accept || '').includes('video'),
-      );
-      if (inputs[0]) {
-        inputs[0].id = 'bili-video-upload-target';
-        return true;
+  let formReady = false;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    if (attempt > 1) {
+      console.warn('[bili] 上传后未出现表单，刷新上传页重试一次...');
+      await page.goto('https://member.bilibili.com/platform/upload/video/frame', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      await humanPause(3000, 5000, '重试上传页加载', 'bili');
+    }
+
+    let inputFound = false;
+    for (let i = 0; i < 30; i++) {
+      inputFound = await page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter(
+          (inp) => (inp.accept || '').includes('.mp4') || (inp.accept || '').includes('video'),
+        );
+        if (inputs[0]) {
+          inputs[0].id = 'bili-video-upload-target';
+          return true;
+        }
+        return false;
+      });
+      if (inputFound) break;
+      await humanPause(800, 1200);
+    }
+    if (!inputFound) continue;
+
+    await humanPause(1200, 2200, '选视频前', 'bili');
+    await page.setInputFiles('#bili-video-upload-target', videoPath);
+
+    let waited = 0;
+    let noFormTicks = 0;
+    const uploadTimeoutMs = Number(process.env.BILIBILI_UPLOAD_TIMEOUT_MS || 480_000);
+    while (waited < uploadTimeoutMs) {
+      const st = await page.evaluate(() => {
+        const titleInp = document.querySelector('input[placeholder="请输入稿件标题"]');
+        const body = document.body?.innerText || '';
+        const uploading = /上传中|转码中|处理中/.test(body);
+        return { hasForm: !!titleInp, uploading };
+      });
+      console.log('upload wait', waited, st);
+      if (st.hasForm && !st.uploading) {
+        formReady = true;
+        break;
       }
-      return false;
-    });
-    if (ok) break;
-    await humanPause(800, 1200);
+      if (!st.hasForm && !st.uploading) {
+        noFormTicks++;
+        if (noFormTicks >= 12) break;
+      } else {
+        noFormTicks = 0;
+      }
+      await humanPause(1500, 2200);
+      waited += 2000;
+    }
+    if (formReady) break;
   }
-
-  await humanPause(1200, 2200, '选视频前', 'bili');
-  await page.setInputFiles('#bili-video-upload-target', videoPath);
-
-  let waited = 0;
-  while (waited < 180000) {
-    const st = await page.evaluate(() => {
-      const titleInp = document.querySelector('input[placeholder="请输入稿件标题"]');
-      const body = document.body?.innerText || '';
-      const uploading = /上传中|转码中|处理中/.test(body);
-      return { hasForm: !!titleInp, uploading };
-    });
-    console.log('upload wait', waited, st);
-    if (st.hasForm && !st.uploading) break;
-    await humanPause(1500, 2200);
-    waited += 2000;
-  }
+  if (!formReady) throw new Error('BILIBILI_UPLOAD_FORM_NOT_LOADED');
   await humanPause(4000, 7000, '表单就绪', 'bili');
 
   await page.evaluate((t) => {
@@ -497,19 +522,50 @@ try {
 
   await clearExistingTags(page);
 
+  // Associate activity topic FIRST if autoHotspot is on, because Bilibili's 参与话题 occupies 1 of the 10 tag slots.
+  if (autoHotspot) {
+    try {
+      await associateBilibiliActivityTopic(page);
+    } catch (e) {
+      console.warn('[bili] 参与话题 note:', String(e?.message || e).slice(0, 120));
+    }
+  }
+
   for (const tag of tags) {
-    await page.evaluate((t) => {
+    const curState = await page.evaluate(() => {
+      const chips = Array.from(document.querySelectorAll('.label-item-v2-container'))
+        .map((el) => (el.innerText || '').replace(/[×x]/g, '').trim())
+        .filter(Boolean);
       const inp = document.querySelector('input[placeholder="按回车键Enter创建标签"]');
-      if (!inp) return;
+      if (!inp) return { count: chips.length, chips, box: null, hasVal: false };
       inp.scrollIntoView({ block: 'center' });
-      inp.focus();
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-      if (setter) setter.call(inp, t);
-      else inp.value = t;
-      inp.dispatchEvent(new Event('input', { bubbles: true }));
-      inp.dispatchEvent(new Event('change', { bubbles: true }));
-    }, tag);
-    await humanPause(250, 450);
+      const r = inp.getBoundingClientRect();
+      return {
+        count: chips.length,
+        chips,
+        hasVal: (inp.value || '').length > 0,
+        box: r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null,
+      };
+    });
+    if (curState.count >= 10) break;
+    if (curState.chips.some((c) => c.toLowerCase() === tag.trim().toLowerCase())) continue;
+
+    if (curState.box) {
+      await humanMouseClick(page, curState.box.x, curState.box.y, { radius: 3, tag: 'bili' });
+      await humanPause(150, 260);
+    } else {
+      await page.evaluate(() => {
+        document.querySelector('input[placeholder="按回车键Enter创建标签"]')?.focus();
+      });
+    }
+    // IMPORTANT: Never press Backspace when tag input is empty — Bilibili deletes the previous tag chip on empty Backspace!
+    if (curState.hasVal) {
+      await page.keyboard.press('Control+a');
+      await page.keyboard.press('Backspace');
+      await humanPause(100, 180);
+    }
+    await page.keyboard.insertText(tag);
+    await humanPause(250, 420);
     await page.keyboard.press('Enter');
     await humanPause(550, 850, `标签 ${tag}`, 'bili');
 
@@ -521,17 +577,17 @@ try {
     }, tag);
 
     if (!added) {
-      await page.evaluate(() => {
+      await page.evaluate((t) => {
         const inp = document.querySelector('input[placeholder="按回车键Enter创建标签"]');
-        inp?.scrollIntoView({ block: 'center' });
-        inp?.focus();
-      });
-      await humanPause(150, 280);
-      await page.keyboard.press('Control+a');
-      await humanPause(100, 180);
-      await page.keyboard.press('Backspace');
-      await page.keyboard.insertText(tag);
-      await humanPause(180, 250);
+        if (!inp) return;
+        inp.focus();
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        if (setter) setter.call(inp, t);
+        else inp.value = t;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+      }, tag);
+      await humanPause(200, 320);
       await page.keyboard.press('Enter');
       await humanPause(550, 850, `标签重试 ${tag}`, 'bili');
     }
@@ -671,12 +727,14 @@ try {
     } catch (e) {
       console.warn('[bili] 推荐标签 note:', String(e?.message || e).slice(0, 120));
     }
-    try {
-      await associateBilibiliActivityTopic(page);
-    } catch (e) {
-      console.warn('[bili] 参与话题 note:', String(e?.message || e).slice(0, 120));
-    }
   }
+
+  const finalTags = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('.label-item-v2-container'))
+      .map((el) => (el.innerText || '').replace(/[×x]/g, '').trim())
+      .filter(Boolean),
+  );
+  console.log(`BILIBILI_FINAL_TAGS: ${finalTags.length}/10`, JSON.stringify(finalTags));
 
   if (schedule) {
     try {

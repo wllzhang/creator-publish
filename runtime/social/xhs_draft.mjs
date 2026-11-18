@@ -234,20 +234,101 @@ async function fillTopics(topics) {
 async function readOriginalOn() {
   return page.evaluate(() => {
     const wrap = document.querySelector('.original-wrapper');
-    if (!wrap) return { found: false, on: false };
+    if (!wrap) return { found: false, on: false, modalOpen: false };
     const input = wrap.querySelector('input[type="checkbox"]');
     const sim = wrap.querySelector('.d-switch-simulator');
     const cls = (sim?.className?.toString?.() || '').split(/\s+/);
+    const modalOpen = Array.from(document.querySelectorAll('.d-modal, [role="dialog"]')).some((d) => {
+      const r = d.getBoundingClientRect();
+      return r.width > 120 && r.height > 80 && /原创声明须知|笔记完成原创声明/.test(d.innerText || '');
+    });
     // Do not use String.includes('checked') — it matches class "unchecked".
-    return { found: true, on: !!input?.checked || cls.includes('checked') };
+    const switchOn = !!input?.checked || cls.includes('checked');
+    return { found: true, on: switchOn && !modalOpen, switchOn, modalOpen };
   });
+}
+
+async function confirmOriginalModalIfOpen() {
+  const modalState = await page.evaluate(() => {
+    const modals = Array.from(document.querySelectorAll('.d-modal, [role="dialog"]')).filter((d) => {
+      const r = d.getBoundingClientRect();
+      return r.width > 120 && r.height > 80 && /原创声明须知|笔记完成原创声明/.test(d.innerText || '');
+    });
+    const dlg = modals[modals.length - 1];
+    if (!dlg) return { open: false };
+
+    const cbSim = dlg.querySelector('.d-checkbox-simulator');
+    const cbInp = dlg.querySelector('input[type="checkbox"]');
+    const isChecked = () =>
+      !!cbInp?.checked || (cbSim?.className?.toString?.() || '').split(/\s+/).includes('checked');
+
+    // Click checkbox simulator ONCE (Vue updates checked state asynchronously on next tick; do NOT double-click cbInp!)
+    if (!isChecked()) {
+      (cbSim || cbInp)?.click();
+    }
+    return { open: true, clickedCheckbox: !isChecked() };
+  });
+
+  if (!modalState.open) return false;
+  console.log('[xhs] 检测到「原创声明须知」确认弹窗，已点击协议勾选框:', JSON.stringify(modalState));
+  await humanPause(750, 1150, '等待声明原创按钮解锁', 'xhs');
+
+  const confirmBtn = await page.evaluate(() => {
+    const modals = Array.from(document.querySelectorAll('.d-modal, [role="dialog"]')).filter((d) => {
+      const r = d.getBoundingClientRect();
+      return r.width > 120 && r.height > 80 && /原创声明须知|笔记完成原创声明/.test(d.innerText || '');
+    });
+    const dlg = modals[modals.length - 1];
+    if (!dlg) return { found: false, reason: 'modal disappeared' };
+
+    const btn = Array.from(dlg.querySelectorAll('button')).find(
+      (b) => (b.innerText || '').replace(/\s+/g, '').trim() === '声明原创',
+    );
+    if (!btn) return { found: false, reason: 'no 声明原创 button' };
+    const r = btn.getBoundingClientRect();
+    const disabled = !!btn.disabled || (btn.className || '').includes('disabled');
+    if (!disabled) btn.click();
+    return {
+      found: true,
+      disabled,
+      x: r.left + r.width / 2,
+      y: r.top + r.height / 2,
+    };
+  });
+
+  if (!confirmBtn.found) {
+    console.warn('[xhs] 原创弹窗内未找到「声明原创」确认按钮:', confirmBtn.reason);
+    return false;
+  }
+  await humanPause(700, 1200, '确认声明原创弹窗', 'xhs');
+
+  // If modal is still open (e.g. button needed a real mouse click after unlocking), click it via mouse
+  const stillOpenBtn = await page.evaluate(() => {
+    const modals = Array.from(document.querySelectorAll('.d-modal, [role="dialog"]')).filter((d) => {
+      const r = d.getBoundingClientRect();
+      return r.width > 120 && r.height > 80 && /原创声明须知|笔记完成原创声明/.test(d.innerText || '');
+    });
+    const dlg = modals[modals.length - 1];
+    if (!dlg) return null;
+    const btn = Array.from(dlg.querySelectorAll('button')).find(
+      (b) => (b.innerText || '').replace(/\s+/g, '').trim() === '声明原创' && !b.disabled,
+    );
+    if (!btn) return null;
+    const r = btn.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  if (stillOpenBtn) {
+    await humanMouseClick(page, stillOpenBtn.x, stillOpenBtn.y, { radius: 3, tag: 'xhs' });
+    await humanPause(700, 1100, '鼠标补点声明原创', 'xhs');
+  }
+  return true;
 }
 
 async function enableOriginalDeclaration() {
   await page.evaluate(() => {
     document.querySelector('.original-wrapper')?.scrollIntoView({ block: 'center' });
   });
-  await humanPause(250, 450);
+  await humanPause(300, 550);
 
   let state = await readOriginalOn();
   if (!state.found) {
@@ -255,7 +336,7 @@ async function enableOriginalDeclaration() {
     return false;
   }
   if (state.on) {
-    console.log('[xhs] 原创声明已勾选');
+    console.log('[xhs] 原创声明已开启');
     return true;
   }
 
@@ -266,6 +347,7 @@ async function enableOriginalDeclaration() {
       wrap?.querySelector('.d-switch') ||
       wrap?.querySelector('.d-switch-box');
     if (!target) return null;
+    target.scrollIntoView({ block: 'center' });
     const r = target.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return null;
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
@@ -275,22 +357,27 @@ async function enableOriginalDeclaration() {
     await humanMouseClick(page, box.x, box.y, { radius: 2, tag: 'xhs' });
   } else {
     await page.evaluate(() => {
-      document.querySelector('.original-wrapper .d-switch')?.click();
+      document.querySelector('.original-wrapper .d-switch-simulator, .original-wrapper .d-switch')?.click();
     });
   }
-  await humanPause(600, 1200, '勾选原创声明后', 'xhs');
+  await humanPause(800, 1400, '点击原创声明开关后', 'xhs');
+
+  // Handle the mandatory「原创声明须知」confirmation modal!
+  await confirmOriginalModalIfOpen();
 
   state = await readOriginalOn();
   if (!state.on) {
-    // Mouse may miss when the row is near the fold; DOM click as fallback.
+    // Fallback retry if first click missed or modal needed a second pass
     await page.evaluate(() => {
-      document.querySelector('.original-wrapper .d-switch')?.click();
+      document.querySelector('.original-wrapper .d-switch-simulator, .original-wrapper .d-switch')?.click();
     });
-    await humanPause(500, 900);
+    await humanPause(800, 1200);
+    await confirmOriginalModalIfOpen();
     state = await readOriginalOn();
   }
 
-  console.log('[xhs] 原创声明:', state.on ? 'ON' : 'OFF');
+  console.log('[xhs] 原创声明:', state.on ? 'ON' : 'OFF', JSON.stringify(state));
+  if (state.on) console.log('XHS_ORIGINAL_DECLARED');
   return state.on;
 }
 
