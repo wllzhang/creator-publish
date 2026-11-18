@@ -21,6 +21,8 @@ allowed_modes: [draft, submit]
 | description-html / description-file | no | HTML value or file |
 | keywords | no | comma-separated |
 | list-price | no | number |
+| ai-generated | no | `yes` \| `no` (default `no`; KDP Generative AI disclosure) |
+| result-file | no | absolute path to output result JSON |
 
 ## run
 
@@ -32,3 +34,9 @@ node runtime/run.mjs --platform kdp_ebook \
   --title "..." \
   --author-first A --author-last B
 ```
+
+## helper tools (`runtime/novel/tools/`)
+
+- `python runtime/novel/tools/make_kdp_cover.py --out C:/abs/cover.jpg --title "..." --subtitle "..." --author "..."`
+- `python runtime/novel/tools/build_epub.py --out C:/abs/book.epub --title "..." --author "..." --manuscript-md C:/abs/manuscript.md --cover C:/abs/cover.jpg`
+- `python runtime/novel/tools/build_pitch_pdf.py --input C:/abs/pitch.md --out C:/abs/pitch_deck.pdf`

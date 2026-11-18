@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Ximalaya: --profile-id --album-id --title --mp3 --intro|--intro-file [--cover] [--lrc] [--submit] */
+/** Ximalaya: --profile-id --album-id --title --mp3 --intro|--intro-file [--cover] [--lrc] [--result-file] [--submit] [--check] */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +47,10 @@ if (lrc && !fs.existsSync(lrc)) {
   process.exit(2);
 }
 
+const resultPath = args['result-file']
+  ? path.resolve(args['result-file'])
+  : tmpJoin('creator-publish-ximalaya-result.json');
+
 const plan = {
   title,
   intro,
@@ -61,17 +65,26 @@ const plan = {
   ai: !args['no-ai'],
   profileId,
   profile_id: profileId,
-  space_name: 'ximalaya-' + new Date().toISOString().replace(/[:.]/g, '-'),
+  space_name: `ximalaya-${process.pid}-${new Date().toISOString().replace(/[:.]/g, '-')}`,
+  result_file: resultPath,
 };
 console.log(JSON.stringify({ ...plan, intro: plan.intro.slice(0, 40) + '…' }, null, 2));
 if (args.check) process.exit(0);
 
-const runPath = tmpJoin('creator-publish-ximalaya-run.json');
-const resultPath = tmpJoin('creator-publish-ximalaya-result.json');
+const runPath = tmpJoin(`creator-publish-ximalaya-run-${process.pid}-${Date.now()}.json`);
+fs.mkdirSync(path.dirname(resultPath), { recursive: true });
 fs.writeFileSync(runPath, JSON.stringify(plan, null, 2), 'utf8');
 try { fs.unlinkSync(resultPath); } catch { /* ok */ }
 process.env.CREATOR_PUBLISH_RUN = runPath;
 process.env.CREATOR_PUBLISH_RESULT = resultPath;
-const code = runEgoMjs(MJS, { timeoutMs: 3_600_000 });
+let code = 1;
+try {
+  code = runEgoMjs(MJS, {
+    timeoutMs: 3_600_000,
+    env: { CREATOR_PUBLISH_RUN: runPath, CREATOR_PUBLISH_RESULT: resultPath },
+  });
+} finally {
+  try { fs.unlinkSync(runPath); } catch { /* ok */ }
+}
 if (fs.existsSync(resultPath)) console.log(fs.readFileSync(resultPath, 'utf8'));
 process.exit(code);

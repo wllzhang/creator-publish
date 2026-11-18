@@ -5,8 +5,8 @@ const fs = await import("node:fs/promises");
 const pathMod = await import("node:path");
 const osMod = await import("node:os");
 const CONFIG_PATH = process.env.CREATOR_PUBLISH_RUN || pathMod.join(osMod.tmpdir(), "creator-publish-fanqie-run.json");
-const RESULT_PATH = process.env.CREATOR_PUBLISH_RESULT || pathMod.join(osMod.tmpdir(), "creator-publish-fanqie-result.json");
 const cfg = JSON.parse(await fs.readFile(CONFIG_PATH, "utf8"));
+const RESULT_PATH = cfg.result_file || process.env.CREATOR_PUBLISH_RESULT || pathMod.join(osMod.tmpdir(), "creator-publish-fanqie-result.json");
 
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -414,9 +414,10 @@ try {
   while (Date.now() < deadline) {
     const loopStatus = await page.evaluate((shouldSubmit) => {
       const isVisible = (el) => el && el.offsetParent !== null && window.getComputedStyle(el).display !== 'none';
-      const bodyText = document.body.innerText;
+      const bodyText = document.body.innerText.replace(/番茄审核工作时间[^\n]*/g, "");
+      const onEditor = location.href.includes("publish-short");
 
-      if (bodyText.includes("发布成功") || bodyText.includes("已发布") || bodyText.includes("审核中") || location.href.includes("short-manage")) {
+      if (bodyText.includes("发布成功") || location.href.includes("short-manage") || (!onEditor && (bodyText.includes("已发布") || bodyText.includes("审核中")))) {
         return "success_submitted";
       }
 

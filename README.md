@@ -35,6 +35,7 @@ node runtime/run.mjs --platform <id> ...
 | `fanqie_short` | Ego browser | submit (omit `--submit` for draft) | `node runtime/run.mjs --platform fanqie_short --profile-id "Profile 2" --title "Book" --body-file "C:\abs\body.md" --cover "C:\abs\cover.png"` |
 | `ximalaya_audio` | Ego browser | submit (omit `--submit` for draft) | `node runtime/run.mjs --platform ximalaya_audio --profile-id "Profile 2" --album-id "123" --title "Title" --mp3 "C:\abs\a.mp3" --intro-file "C:\abs\intro.txt"` |
 | `kdp_ebook` | Ego browser | submit (omit `--submit` for draft) | `node runtime/run.mjs --platform kdp_ebook --profile-id "Profile 2" --epub "C:\abs\book.epub" --cover "C:\abs\cover.jpg" --title "Title"` |
+| `gmail` | Ego browser | draft | `node runtime/run.mjs --platform gmail --profile-id "Profile 2" --to "a@example.com" --subject "Subject" --body-file "C:\abs\body.txt" --attachments "C:\abs\deck.pdf"` |
 | `wechat_mp` | Official API (Node) | draft | `node runtime/run.mjs --platform wechat_mp --api-env "C:\abs\wechat_mp.env" --title "Title" --html-file "C:\abs\article.html" --cover "C:\abs\cover.jpg"` |
 
 See [`platforms/`](platforms/) for required fields and [`runtime/README.md`](runtime/README.md) for examples.

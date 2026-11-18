@@ -19,6 +19,7 @@ allowed_modes: [draft, submit]
 | intro / intro-file | yes | string or file |
 | cover | no | absolute path |
 | lrc | no | absolute path |
+| result-file | no | absolute path to output result JSON |
 
 ## run
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Fanqie: --profile-id --title --body|--body-file --cover [--category] [--submit] [--check] */
+/** Fanqie: --profile-id --title --body|--body-file --cover [--category] [--result-file] [--submit] [--check] */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,14 +44,16 @@ try {
   process.exit(2);
 }
 const category = args.category || '都市日常';
-const plan = { title, body, category, cover: cover.replace(/\\/g, '/') };
+const resultPath = args['result-file']
+  ? path.resolve(args['result-file'])
+  : tmpJoin('creator-publish-fanqie-result.json');
+const plan = { title, body, category, cover: cover.replace(/\\/g, '/'), result_file: resultPath };
 console.log(JSON.stringify({ ...plan, body: plan.body.slice(0, 60) + '…' }, null, 2));
 if (args.check) process.exit(0);
 
-const runPath = tmpJoin('creator-publish-fanqie-run.json');
-const resultPath = tmpJoin('creator-publish-fanqie-result.json');
+const runPath = tmpJoin(`creator-publish-fanqie-run-${process.pid}-${Date.now()}.json`);
 const cfg = {
-  space_name: 'fanqie-pub-' + new Date().toISOString().replace(/[:.]/g, '-'),
+  space_name: `fanqie-pub-${process.pid}-${ new Date().toISOString().replace(/[:.]/g, '-') }`,
   profileId,
   title: plan.title,
   body: plan.body,
@@ -60,11 +62,21 @@ const cfg = {
   trial: Number(args.trial || 99),
   ai: !args['no-ai'],
   submit: !!args.submit,
+  result_file: resultPath,
 };
+fs.mkdirSync(path.dirname(resultPath), { recursive: true });
 fs.writeFileSync(runPath, JSON.stringify(cfg, null, 2), 'utf8');
 try { fs.unlinkSync(resultPath); } catch { /* ok */ }
 process.env.CREATOR_PUBLISH_RUN = runPath;
 process.env.CREATOR_PUBLISH_RESULT = resultPath;
-const code = runEgoMjs(MJS, { timeoutMs: 600_000 });
+let code = 1;
+try {
+  code = runEgoMjs(MJS, {
+    timeoutMs: 600_000,
+    env: { CREATOR_PUBLISH_RUN: runPath, CREATOR_PUBLISH_RESULT: resultPath },
+  });
+} finally {
+  try { fs.unlinkSync(runPath); } catch { /* ok */ }
+}
 if (fs.existsSync(resultPath)) console.log(fs.readFileSync(resultPath, 'utf8'));
 process.exit(code);

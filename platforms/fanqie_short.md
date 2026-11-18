@@ -17,6 +17,7 @@ allowed_modes: [draft, submit]
 | body / body-file | yes | text value, or absolute path to text/markdown file |
 | cover | yes | absolute path to cover image |
 | category | no | platform category string |
+| result-file | no | absolute path to output result JSON |
 
 ## run
 

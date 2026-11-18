@@ -7,6 +7,7 @@
  * Routes:
  *   douyin | bilibili | weixin_channels | xiaohongshu  → write_job + Ego social
  *   fanqie_short | ximalaya_audio | kdp_ebook          → novel/*_publish.mjs
+ *   gmail                                              → email/gmail_publish.mjs
  *   wechat_mp                                          → wechat/wechat_mp_draft.mjs
  */
 import path from 'node:path';
@@ -30,7 +31,11 @@ const NOVEL = {
   kdp_ebook: 'novel/kdp_publish.mjs',
 };
 
-const ALL = new Set([...Object.keys(SOCIAL), ...Object.keys(NOVEL), 'wechat_mp']);
+const EMAIL = {
+  gmail: 'email/gmail_publish.mjs',
+};
+
+const ALL = new Set([...Object.keys(SOCIAL), ...Object.keys(NOVEL), ...Object.keys(EMAIL), 'wechat_mp']);
 
 function forwardArgv(argv = process.argv.slice(2)) {
   // Drop --platform <value> so child CLIs that don't expect it stay clean.
@@ -91,6 +96,10 @@ if (SOCIAL[platform]) {
 
 if (NOVEL[platform]) {
   process.exit(runNode(path.join(HERE, NOVEL[platform]), forwarded, { timeoutMs: 3_600_000 }));
+}
+
+if (EMAIL[platform]) {
+  process.exit(runNode(path.join(HERE, EMAIL[platform]), forwarded, { timeoutMs: 600_000 }));
 }
 
 // wechat_mp

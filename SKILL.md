@@ -34,8 +34,9 @@ Fields per platform: [`platforms/`](platforms/). Summary:
 | xiaohongshu | `images` (file list), `title`, optional `body`/`body-file`, `topics` |
 | wechat_mp | `api-env`, `title`, `html`/`html-file`, `cover`, optional `body-images`; egress 从 `--egress` / env / api-env（含已有 `WECHAT_MP_EGRESS_IP`）解析，不走 VPN |
 | fanqie_short | `title`, `body`/`body-file`, `cover`, optional `category` |
-| ximalaya_audio | `album-id`, `title`, `mp3`, `intro`/`intro-file`, optional `cover`,`lrc` |
-| kdp_ebook | `epub`, `cover`, `title`, optional metadata flags |
+| ximalaya_audio | `album-id`, `title`, `mp3`, `intro`/`intro-file`, optional `cover`,`lrc`,`result-file` |
+| kdp_ebook | `epub`, `cover`, `title`, optional metadata flags, `ai-generated`, `result-file` |
+| gmail | `to`, `subject`, `body`/`body-file`, optional `attachments`, `account-index`, `result-file` (default `draft`) |
 
 ## Layout
 

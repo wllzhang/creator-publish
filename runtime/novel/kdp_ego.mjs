@@ -7,6 +7,7 @@ const pathMod = await import("node:path");
 const osMod = await import("node:os");
 const CONFIG_PATH = process.env.CREATOR_PUBLISH_RUN || pathMod.join(osMod.tmpdir(), "creator-publish-kdp-run.json");
 const cfg = JSON.parse(await fs.readFile(CONFIG_PATH, "utf8"));
+const RESULT_PATH = cfg.result_file || process.env.CREATOR_PUBLISH_RESULT || pathMod.join(osMod.tmpdir(), "creator-publish-kdp-result.json");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const safeGoto = async (url, timeout = 25000) => {
@@ -68,7 +69,7 @@ async function executePublish() {
 
   console.log("[*] 书架匹配情况:", JSON.stringify(bookStatus));
 
-  const resPath = pathMod.join(osMod.tmpdir(), "creator-publish-kdp-result.json");
+  const resPath = RESULT_PATH;
 
   if (bookStatus.isLive) {
     console.log(`[*] 该作品已在亚马逊 Kindle 商店正式上架 (Live)! 无需重复提审。`);
@@ -462,24 +463,54 @@ async function executePublish() {
   }
   await sleep(3000);
 
-  // 3. Generative AI -> No (MDN / AUI Radio)
-  console.log("   -> 选定 Generative AI 为 No...");
-  await page.evaluate(() => {
+  // 3. Generative AI disclosure (truthful Yes/No via --ai-generated, default 'no')
+  const isAiGen = String(cfg.ai_generated || "no").trim().toLowerCase() === "yes";
+  console.log(`   -> 选定 Generative AI 为 ${isAiGen ? "Yes" : "No"}...`);
+  await page.evaluate((wantYes) => {
+    const targetLabel = wantYes ? "Yes" : "No";
+    const targetRow = wantYes ? "yes" : "no";
     const radios = Array.from(document.querySelectorAll('[role="radio"]'));
-    const noRadio = radios.find(r => r.innerText?.trim() === 'No');
-    if (noRadio) {
-      noRadio.scrollIntoView({ block: 'center' });
-      const link = noRadio.querySelector('a') || noRadio;
+    const matchRadio = radios.find(r => r.innerText?.trim() === targetLabel);
+    if (matchRadio) {
+      matchRadio.scrollIntoView({ block: 'center' });
+      const link = matchRadio.querySelector('a') || matchRadio;
       link.click();
     }
-    const noBox = document.querySelector('[data-a-accordion-row-name="no"]');
-    const noLink = noBox?.querySelector('a.a-accordion-row, a') || noBox;
-    if (noLink) {
-      noLink.scrollIntoView({ block: 'center' });
-      noLink.click();
+    const rowBox = document.querySelector(`[data-a-accordion-row-name="${targetRow}"]`);
+    const rowLink = rowBox?.querySelector('a.a-accordion-row, a') || rowBox;
+    if (rowLink) {
+      rowLink.scrollIntoView({ block: 'center' });
+      rowLink.click();
     }
-  });
+  }, isAiGen);
   await sleep(2000);
+
+  if (isAiGen) {
+    // When Generative AI = Yes, populate any visible KDP disclosure sub-selects (Texts / Images / Translations) if unselected
+    await page.evaluate(() => {
+      const yesContainer = document.querySelector('[data-a-accordion-row-name="yes"]') || document;
+      const selects = Array.from(yesContainer.querySelectorAll('select')).filter(
+        s => s.offsetParent !== null && (!s.value || s.value === '' || /select/i.test(s.options[s.selectedIndex]?.text || ''))
+      );
+      for (const sel of selects) {
+        const opts = Array.from(sel.options).filter(o => o.value && !/select/i.test(o.text));
+        if (!opts.length) continue;
+        const labelCtx = (sel.closest('.a-row, div')?.innerText || '').toLowerCase();
+        let chosen = opts[0];
+        if (labelCtx.includes('translation')) {
+          chosen = opts.find(o => /none/i.test(o.text)) || opts[0];
+        } else if (labelCtx.includes('text') || labelCtx.includes('image')) {
+          chosen = opts.find(o => /some|extensive|minimal|entire/i.test(o.text)) || opts[0];
+        }
+        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sel), 'value')?.set;
+        if (setter) setter.call(sel, chosen.value);
+        else sel.value = chosen.value;
+        sel.dispatchEvent(new Event('input', { bubbles: true }));
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await sleep(1000);
+  }
 
   // 4. Accessibility image_reading radio 确保选定
   await page.evaluate(() => {
@@ -690,6 +721,7 @@ async function executePublish() {
   }
   await sleep(2000);
 
+  let submitSuccess = false;
   if (cfg.submit) {
     console.log("[*] 正式提交发布 (Publish Your Kindle eBook)...");
     await page.evaluate(() => {
@@ -707,7 +739,6 @@ async function executePublish() {
       }
     });
 
-    let submitSuccess = false;
     for (let i = 0; i < 15; i++) {
       await sleep(2500);
       const st = await page.evaluate(() => {
@@ -768,13 +799,33 @@ async function executePublish() {
 
   console.log(">>> [书架最终确认] <<<", finalShelf);
 
-  await fs.writeFile(resPath, JSON.stringify({
-    status: cfg.submit ? "submitted" : "draft",
-    submitted: !!cfg.submit,
-    title: cfg.title,
-    shelf: finalShelf,
-    time: new Date().toISOString()
-  }, null, 2), "utf8");
+  const shelfConfirmed = /\b(in review|publishing|live)\b/i.test(finalShelf);
+  if (cfg.submit) {
+    const confirmed = Boolean(submitSuccess || shelfConfirmed);
+    if (!confirmed) {
+      console.error("   [!] KDP 提交结果未确认（未见成功弹窗且书架未进入 In review / Publishing / Live）:", finalShelf);
+      exitCode = 1;
+    }
+    await fs.writeFile(resPath, JSON.stringify({
+      status: confirmed ? "submitted" : "submit_unconfirmed",
+      submitted: confirmed,
+      submitSuccess: confirmed,
+      title: cfg.title,
+      ai_generated: isAiGen ? "yes" : "no",
+      shelf: finalShelf,
+      time: new Date().toISOString()
+    }, null, 2), "utf8");
+  } else {
+    await fs.writeFile(resPath, JSON.stringify({
+      status: "draft",
+      submitted: false,
+      submitSuccess: false,
+      title: cfg.title,
+      ai_generated: isAiGen ? "yes" : "no",
+      shelf: finalShelf,
+      time: new Date().toISOString()
+    }, null, 2), "utf8");
+  }
 }
 
 try {
@@ -782,6 +833,16 @@ try {
 } catch (err) {
   console.error("[-] 执行异常:", err);
   exitCode = 1;
+  try {
+    await fs.writeFile(RESULT_PATH, JSON.stringify({
+      status: "failed",
+      submitted: false,
+      submitSuccess: false,
+      title: cfg.title,
+      error: String(err && err.message || err),
+      time: new Date().toISOString()
+    }, null, 2), "utf8");
+  } catch { /* ignore */ }
 } finally {
   await task.finish({ keep: [] });
   console.log("[Ego] Task space finished.");

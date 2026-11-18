@@ -7,8 +7,8 @@ const fs = await import("node:fs/promises");
 const pathMod = await import("node:path");
 const osMod = await import("node:os");
 const CONFIG_PATH = process.env.CREATOR_PUBLISH_RUN || pathMod.join(osMod.tmpdir(), "creator-publish-ximalaya-run.json");
-const RESULT_PATH = process.env.CREATOR_PUBLISH_RESULT || pathMod.join(osMod.tmpdir(), "creator-publish-ximalaya-result.json");
 const cfg = JSON.parse(await fs.readFile(CONFIG_PATH, "utf8"));
+const RESULT_PATH = cfg.result_file || process.env.CREATOR_PUBLISH_RESULT || pathMod.join(osMod.tmpdir(), "creator-publish-ximalaya-result.json");
 
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -17,6 +17,7 @@ node runtime/run.mjs --platform <id> ...
 | `fanqie_short` | novel 适配器 |
 | `ximalaya_audio` | novel 适配器 |
 | `kdp_ebook` | novel 适配器 |
+| `gmail` | email 适配器（默认 draft，附件先校验存在与芯片上传） |
 | `wechat_mp` | 官方 API（SSH 出口 / local） |
 
 ### 社媒示例
