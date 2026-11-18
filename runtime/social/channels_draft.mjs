@@ -102,7 +102,7 @@ async function uploadVideo(fileAbs) {
   return `fileChooser@${trigger.root}`;
 }
 
-async function waitUploadDone(timeoutMs = 180000) {
+async function waitUploadDone(timeoutMs = Number(process.env.WEIXIN_CHANNELS_UPLOAD_TIMEOUT_MS || 480000)) {
   const start = Date.now();
   let ticks = 0;
   let lastReady = false;

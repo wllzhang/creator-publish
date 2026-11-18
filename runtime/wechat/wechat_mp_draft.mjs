@@ -15,6 +15,7 @@
  *
  * Required: --api-env --title --html-file|--html --cover
  * Optional: --body-images --digest --author --egress --out
+ *           --no-comment --only-fans-comment --profile-id --no-original --shot-dir
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,9 +23,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { parseArgs, need } from '../lib/cli_args.mjs';
+import { runEgoMjs, tmpJoin } from '../lib/ego_util.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_DRAFT = path.join(__dirname, 'api_draft.mjs');
+const MP_ORIGINAL_EGO = path.join(__dirname, 'mp_original_ego.mjs');
 const FALLBACK_SSH = '';
 
 function loadEnvFile(filePath) {
@@ -113,7 +116,9 @@ function shellQuote(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
-function buildApiArgs({ apiEnv, title, htmlFile, cover, bodyImages, digest, author, scheduleTime, out }) {
+function buildApiArgs({
+  apiEnv, title, htmlFile, cover, bodyImages, digest, author, scheduleTime, noComment, onlyFansComment, out,
+}) {
   const args = [
     API_DRAFT,
     '--api-env', apiEnv,
@@ -126,6 +131,8 @@ function buildApiArgs({ apiEnv, title, htmlFile, cover, bodyImages, digest, auth
   if (digest) args.push('--digest', digest);
   if (author) args.push('--author', author);
   if (scheduleTime) args.push('--schedule-time', scheduleTime);
+  if (noComment) args.push('--no-comment');
+  if (onlyFansComment) args.push('--only-fans-comment');
   return args;
 }
 
@@ -144,7 +151,7 @@ function runLocalNode(common) {
 }
 
 function runSshEgress({
-  host, apiEnv, title, htmlFile, cover, bodyImages, digest, author, scheduleTime, out, egressNote, expectIp,
+  host, apiEnv, title, htmlFile, cover, bodyImages, digest, author, scheduleTime, noComment, onlyFansComment, out, egressNote, expectIp,
 }) {
   const stamp = Date.now().toString(16);
   const remoteBase = `/tmp/creator_publish_wechat_${stamp}`;
@@ -185,7 +192,9 @@ function runSshEgress({
       (remoteBody.length ? ` --body-images ${shellQuote(remoteBody.join(','))}` : '') +
       (digest ? ` --digest ${shellQuote(digest)}` : '') +
       (author ? ` --author ${shellQuote(author)}` : '') +
-      (scheduleTime ? ` --schedule-time ${shellQuote(scheduleTime)}` : ''),
+      (scheduleTime ? ` --schedule-time ${shellQuote(scheduleTime)}` : '') +
+      (noComment ? ' --no-comment' : '') +
+      (onlyFansComment ? ' --only-fans-comment' : ''),
     `ec=$?`,
     `shred -u ${remoteBase}/secrets/wechat_mp.env 2>/dev/null || rm -f ${remoteBase}/secrets/wechat_mp.env`,
     `exit $ec`,
@@ -254,6 +263,14 @@ for (const p of bodyImages) {
   }
 }
 
+const noComment = !!args['no-comment'];
+const onlyFansComment = !!args['only-fans-comment'];
+const noOriginal = !!args['no-original'];
+const profileId = String(
+  args['profile-id'] || process.env.WECHAT_MP_PROFILE_ID || fileEnv.WECHAT_MP_PROFILE_ID || '',
+).trim();
+const shotDir = args['shot-dir'] ? path.resolve(String(args['shot-dir'])) : '';
+
 const common = {
   apiEnv,
   title,
@@ -263,6 +280,8 @@ const common = {
   digest: args.digest || '',
   author: args.author || fileEnv.WECHAT_MP_AUTHOR || '',
   scheduleTime: args['schedule-time'] || args.schedule || '',
+  noComment,
+  onlyFansComment,
   out,
   egressNote: resolved.source,
   expectIp,
@@ -279,6 +298,53 @@ try {
     runLocalNode(common);
   } else {
     runSshEgress({ host: resolved.target, ...common });
+  }
+
+  // Post-step via Ego browser: declare Original (声明原创) & verify Comments (开启留言)
+  // Official WeChat MP draft/add API supports need_open_comment=1 but has no API field for Original declaration.
+  if (!noOriginal && profileId) {
+    console.log(`[*] Ego post-step: declaring Original (原创) & verifying Comments (留言) via profileId="${profileId}"...`);
+    const resultJson = fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, 'utf8')) : {};
+    const jobPath = tmpJoin(`creator-publish-wechat-mp-original-${Date.now().toString(16)}.json`);
+    fs.writeFileSync(
+      jobPath,
+      JSON.stringify(
+        {
+          platform: 'wechat_mp',
+          mode: 'draft',
+          profileId,
+          title,
+          author: common.author,
+          mediaId: resultJson.media_id || '',
+          original: true,
+          comment: !noComment,
+          onlyFansComment,
+          shotDir,
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+    const ec = runEgoMjs(MP_ORIGINAL_EGO, {
+      timeoutMs: 240_000,
+      env: { CREATOR_PUBLISH_JOB: jobPath },
+    });
+    try { fs.unlinkSync(jobPath); } catch { /* ignore */ }
+    if (ec !== 0) {
+      console.error(`[!] Ego original declaration step exited with code ${ec}`);
+      process.exit(ec);
+    }
+    if (fs.existsSync(out)) {
+      const merged = { ...resultJson, original_declared: true, comment_enabled: !noComment };
+      fs.writeFileSync(out, JSON.stringify(merged, null, 2), 'utf8');
+    }
+  } else if (!noOriginal && !profileId) {
+    console.log(
+      '[!] API draft saved with need_open_comment=' +
+        (noComment ? '0' : '1') +
+        '; pass --profile-id "<EgoProfile>" (or set WECHAT_MP_PROFILE_ID) to also auto-declare Original (原创) in mp.weixin.qq.com.',
+    );
   }
 } finally {
   if (tmpHtml) {

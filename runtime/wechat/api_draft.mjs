@@ -162,6 +162,16 @@ const cover = path.resolve(need(args, 'cover'));
 const out = path.resolve(args.out || 'api_draft_result.json');
 const digest = args.digest || '';
 const scheduleTime = args['schedule-time'] || args.schedule || null;
+const needOpenComment = args['no-comment']
+  ? 0
+  : args['need-open-comment'] !== undefined
+    ? Number(args['need-open-comment'])
+    : 1;
+const onlyFansCanComment = args['only-fans-comment']
+  ? 1
+  : args['only-fans-can-comment'] !== undefined
+    ? Number(args['only-fans-can-comment'])
+    : 0;
 
 if (!fs.existsSync(apiEnv)) {
   console.error('api-env not found:', apiEnv);
@@ -224,8 +234,8 @@ const article = {
   content: html,
   content_source_url: '',
   thumb_media_id: thumbMediaId,
-  need_open_comment: 0,
-  only_fans_can_comment: 0,
+  need_open_comment: needOpenComment,
+  only_fans_can_comment: onlyFansCanComment,
 };
 
 console.log('[*] draft/add');
@@ -244,6 +254,8 @@ const result = {
   thumb_media_id: thumbMediaId,
   title,
   author,
+  need_open_comment: needOpenComment,
+  only_fans_can_comment: onlyFansCanComment,
   scheduleTime,
   body_image_cdn: mapping,
   egress: 'api_draft.mjs',

@@ -36,7 +36,7 @@ node runtime/run.mjs --platform <id> ...
 | `ximalaya_audio` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） | `node runtime/run.mjs --platform ximalaya_audio --profile-id "Profile 2" --album-id "123" --title "标题" --mp3 "C:\abs\a.mp3" --intro-file "C:\abs\intro.txt"` |
 | `kdp_ebook` | Ego 浏览器 | submit（省略 `--submit` 则为草稿） | `node runtime/run.mjs --platform kdp_ebook --profile-id "Profile 2" --epub "C:\abs\book.epub" --cover "C:\abs\cover.jpg" --title "Title"` |
 | `gmail` | Ego 浏览器 | draft（草稿） | `node runtime/run.mjs --platform gmail --profile-id "Profile 2" --to "a@example.com" --subject "Subject" --body-file "C:\abs\body.txt" --attachments "C:\abs\deck.pdf"` |
-| `wechat_mp` | 公众号官方 API（Node） | draft（草稿） | `node runtime/run.mjs --platform wechat_mp --api-env "C:\abs\wechat_mp.env" --title "标题" --html-file "C:\abs\article.html" --cover "C:\abs\cover.jpg"` |
+| `wechat_mp` | 公众号官方 API（Node）+ 可选 Ego 原创声明 | draft（草稿，默认开启留言） | `node runtime/run.mjs --platform wechat_mp --api-env "C:\abs\wechat_mp.env" --profile-id "Profile 2" --title "标题" --html-file "C:\abs\article.html" --cover "C:\abs\cover.jpg"` |
 
 字段说明见 [`platforms/`](platforms/)，运行示例见 [`runtime/README.md`](runtime/README.md)。
 

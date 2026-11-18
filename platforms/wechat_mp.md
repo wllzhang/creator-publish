@@ -12,13 +12,16 @@ allowed_modes: [draft]
 
 | field | required | notes |
 |---|---|---|
-| profileId | no | unused (API, not ego) |
+| profile-id | no | Ego profile id (or `WECHAT_MP_PROFILE_ID`); when set, automatically opens `mp.weixin.qq.com` after `draft/add` to declare Original (声明原创), verify Comments (开启留言), and re-save draft |
 | api-env | yes | abs path; see env keys below |
 | title | yes | string |
 | html / html-file | yes | article HTML (value or file) |
 | cover | yes | abs path; thumb via `material/add_material` |
 | body-images | no | comma-separated local files → `media/uploadimg` |
 | digest / author | no | author falls back to `WECHAT_MP_AUTHOR` in api-env |
+| no-comment / only-fans-comment | no | `need_open_comment` defaults to `1` (comments ON for all readers); pass `--no-comment` to disable or `--only-fans-comment` to restrict to followers |
+| no-original | no | skip Ego Original (声明原创) post-step even if `--profile-id` is set |
+| shot-dir | no | optional directory for before/after screenshots of the Ego settings step |
 | egress | no | override; see egress resolution |
 
 ## api-env keys
@@ -44,7 +47,8 @@ allowed_modes: [draft]
 
 ## success_when
 
-- `draft/add` returns `media_id`; cover thumb bound; body images are mmbiz CDN when provided
+- `draft/add` returns `media_id` with `need_open_comment=1`; cover thumb bound; body images are mmbiz CDN when provided
+- When `--profile-id` (or `WECHAT_MP_PROFILE_ID`) is set and `--no-original` is omitted: Ego post-step declares Original (文字原创), verifies Comments ON, and clicks「保存为草稿」(`WECHAT_MP_ORIGINAL_SAVED`, never clicks publish/群发)
 
 ## run
 
