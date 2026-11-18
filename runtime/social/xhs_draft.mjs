@@ -13,6 +13,7 @@ import {
   cleanSuggestLabel,
   scoreCandidateMatch,
   parseScheduleTime,
+  suppressNativeFileDialog,
 } from '../lib/ego_dom.mjs';
 
 const { job } = loadJob();
@@ -390,6 +391,7 @@ try {
   } catch (e) {
     console.warn('[xhs] goto timeout:', e.message?.slice(0, 160));
   }
+  await suppressNativeFileDialog(page);
   await humanPause(5000, 9000, '发布页加载', 'xhs');
 
   const cur = await page.url();

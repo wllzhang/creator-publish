@@ -14,6 +14,7 @@ import {
   cleanSuggestLabel,
   scoreCandidateMatch,
   parseScheduleTime,
+  suppressNativeFileDialog,
 } from '../lib/ego_dom.mjs';
 
 const { job } = loadJob();
@@ -354,6 +355,7 @@ async function uploadDouyinVideoWithRetry(page, filePath) {
     if (attempt > 1) {
       console.warn(`[dy] 上传重试第 ${attempt}/${maxAttempts} 次（上次原因: ${lastReason}）...`);
       await page.goto('https://creator.douyin.com/creator-micro/content/upload', { waitUntil: 'load' }).catch(() => {});
+      await suppressNativeFileDialog(page);
       await humanPause(2500, 4200, '重试上传页加载', 'dy');
     }
 
@@ -476,6 +478,7 @@ const page = task.page('p1');
 try {
   console.log('Navigating Douyin upload...');
   await page.goto('https://creator.douyin.com/creator-micro/content/upload', { waitUntil: 'load' });
+  await suppressNativeFileDialog(page);
   await humanPause(2500, 4500, '上传页加载', 'dy');
 
   const curUrl = await page.url();

@@ -268,3 +268,18 @@ export function parseScheduleTime(raw) {
   };
 }
 
+/**
+ * Prevent Chromium from popping up a native OS file-chooser dialog on top of all Ego spaces
+ * if any page click triggers `<input type="file">.click()`. CDP `DOM.setFileInputFiles`
+ * (`page.setInputFiles`) continues to work silently with zero native OS window.
+ */
+export async function suppressNativeFileDialog(page) {
+  if (typeof page?.cdp !== 'function') return false;
+  try {
+    await page.cdp('Page.setInterceptFileChooserDialog', { enabled: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+

@@ -15,6 +15,7 @@ import {
   cleanSuggestLabel,
   scoreCandidateMatch,
   parseScheduleTime,
+  suppressNativeFileDialog,
 } from '../lib/ego_dom.mjs';
 
 function toChannelsShortTitle(raw) {
@@ -131,6 +132,7 @@ async function waitUploadDone(timeoutMs = Number(process.env.WEIXIN_CHANNELS_UPL
 
 try {
   await page.goto('https://channels.weixin.qq.com/platform/post/create', { waitUntil: 'load' }).catch(() => {});
+  await suppressNativeFileDialog(page);
   await humanPause(3500, 5500, '创建页加载', 'wxch');
 
   const curUrl = await page.url();

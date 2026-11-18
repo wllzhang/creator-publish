@@ -15,6 +15,7 @@ import {
   deriveHotspotKeywords,
   scoreCandidateMatch,
   parseScheduleTime,
+  suppressNativeFileDialog,
 } from '../lib/ego_dom.mjs';
 
 function ensureCoverFile(videoFile, explicitCover) {
@@ -386,6 +387,7 @@ try {
       timeout: 60000,
     })
     .catch((e) => console.warn('goto note', e.message?.slice(0, 120)));
+  await suppressNativeFileDialog(page);
   await humanPause(3000, 5500, '上传页加载', 'bili');
 
   const curUrl = await page.url();
@@ -400,6 +402,7 @@ try {
     if (attempt > 1) {
       console.warn('[bili] 上传后未出现表单，刷新上传页重试一次...');
       await page.goto('https://member.bilibili.com/platform/upload/video/frame', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      await suppressNativeFileDialog(page);
       await humanPause(3000, 5000, '重试上传页加载', 'bili');
     }
 
@@ -596,6 +599,7 @@ try {
   const effectiveCover = ensureCoverFile(videoPath, coverPath);
   if (effectiveCover && fs.existsSync(effectiveCover.replace(/\//g, path.sep))) {
     try {
+      await suppressNativeFileDialog(page);
       await page.evaluate(() => {
         const nodes = Array.from(document.querySelectorAll('div, span, button, a, label'));
         const leaf = nodes.find(
