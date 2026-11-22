@@ -33,7 +33,8 @@ function splitList(s) {
 
 function readMaybeFile(value, fileFlag) {
   if (fileFlag) return fs.readFileSync(path.resolve(fileFlag), 'utf8');
-  return value || null;
+  if (value === undefined || value === null) return null;
+  return String(value);
 }
 
 const args = parseArgs();
@@ -65,6 +66,7 @@ const job = {
   mode,
   profileId,
   scheduleTime,
+  keepOpen: args['keep-open'] === true || args['keep-open'] === 'true',
   // video platforms
   video: absOrNull(args.video),
   title: args.title || null,

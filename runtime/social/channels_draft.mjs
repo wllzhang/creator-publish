@@ -28,8 +28,15 @@ function toChannelsShortTitle(raw) {
 const { job } = loadJob();
 const videoPath = abs(job.video);
 const shortTitle = toChannelsShortTitle(job.title);
-const postContent = job.body ? String(job.body).trim() : String(job.title || '').trim();
 const topics = normalizeTopics(job.topics);
+const postContent =
+  job.body === ''
+    ? ''
+    : job.body != null
+      ? String(job.body).trim()
+      : topics.length
+        ? ''
+        : String(job.title || '').trim();
 const autoHotspot = job.autoHotspot !== false;
 const hotspotKeywords = deriveHotspotKeywords(job);
 const shotDir = resolveShotDir(job);
@@ -643,5 +650,5 @@ try {
     throw new Error(`WEIXIN_CHANNELS_DRAFT_NOT_SAVED: ${lastErr || 'not found in draftListManager'}`);
   }
 } finally {
-  await task.finish({ keep: [] });
+  await task.finish({ keep: job.keepOpen ? [page.label || 'p1'] : [] });
 }

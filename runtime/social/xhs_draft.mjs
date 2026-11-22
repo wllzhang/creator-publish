@@ -584,5 +584,5 @@ try {
   if (!savedOk) console.warn('未检测到保存成功 toast，请人工看草稿箱');
   console.log('XHS_STAGED_DONE');
 } finally {
-  await task.finish({ keep: [] });
+  await task.finish({ keep: job.keepOpen ? [page.label || 'p1'] : [] });
 }

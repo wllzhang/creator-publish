@@ -693,5 +693,5 @@ try {
   console.log('DOUYIN_STAGED_STOP_BEFORE_PUBLISH');
   console.log('spaceId', task.spaceId);
 } finally {
-  await task.finish({ keep: [] });
+  await task.finish({ keep: job.keepOpen ? [page.label || 'p1'] : [] });
 }

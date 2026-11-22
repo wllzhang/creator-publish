@@ -905,5 +905,5 @@ try {
   console.log(saved ? 'BILIBILI_DRAFT_DONE' : 'BILIBILI_DRAFT_UNCONFIRMED_CHECK_MANAGER');
   console.log('spaceId', task.spaceId);
 } finally {
-  await task.finish({ keep: [] });
+  await task.finish({ keep: job.keepOpen ? [page.label || 'p1'] : [] });
 }

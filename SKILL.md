@@ -23,6 +23,7 @@ node runtime/run.mjs --platform <id> [profileId + platform fields] [mode?]
 | `mode` | `draft` = stop before final publish; `submit` = confirm. Omit → platform `default_mode` |
 | `hotspot` / `activity` / `no-auto-hotspot` | Social platforms auto-associate platform hotspot/trending suggestions/activities by default from `topics` + `title`; pass `--hotspot`/`--activity` to override or `--no-auto-hotspot` to disable |
 | `shot-dir` | Optional directory for before/after draft proof screenshots |
+| `keep-open` | Optional flag (`--keep-open`) to retain the browser tab after finishing instead of closing the Ego taskSpace |
 
 Fields per platform: [`platforms/`](platforms/). Summary:
 
