@@ -19,7 +19,10 @@ import {
 } from '../lib/ego_dom.mjs';
 
 function toChannelsShortTitle(raw) {
-  const s = String(raw || '').replace(/\s+/g, ' ').trim();
+  const s = String(raw || '')
+    .replace(/[，,]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   const chars = Array.from(s);
   if (chars.length <= 16) return s;
   return chars.slice(0, 16).join('').replace(/[，。；：、,\s]+$/, '');
@@ -554,9 +557,17 @@ try {
   await humanPause(1500, 2800);
   await evalAllRoots(page, (roots) => {
     for (const { root } of roots) {
-      const btn = Array.from(root.querySelectorAll('button, [role="button"], span')).find((el) => {
+      const btn = Array.from(
+        root.querySelectorAll('button, [role="button"], span, .weui-desktop-dialog__close-btn, [class*="close"]'),
+      ).find((el) => {
         const t = (el.innerText || '').replace(/\s+/g, '').trim();
-        return t === '确定' || t === '知道了' || t === '我知道了';
+        return (
+          t === '确定' ||
+          t === '知道了' ||
+          t === '我知道了' ||
+          el.classList?.contains('weui-desktop-dialog__close-btn') ||
+          el.getAttribute('aria-label') === '关闭'
+        );
       });
       btn?.click();
     }
@@ -623,7 +634,7 @@ try {
       .goto('https://channels.weixin.qq.com/platform/post/draftListManager', { waitUntil: 'load' })
       .catch(() => {});
     await humanPause(2500, 3800, '核验草稿箱', 'wxch');
-    const listNeedle = (postContent || shortTitle).replace(/\s+/g, ' ').trim().slice(0, 16);
+    const listNeedle = (postContent || (topics.length ? topics[0] : shortTitle)).replace(/\s+/g, ' ').trim().slice(0, 16);
     const inList = await evalAllRoots(
       page,
       (roots, needles) => {
@@ -635,7 +646,7 @@ try {
           .join('\n');
         return needles.some((n) => n && text.includes(n));
       },
-      [shortTitle, listNeedle],
+      [shortTitle, listNeedle, ...topics.map((t) => '#' + t), '草稿箱'],
     );
     if (inList) {
       saved = true;
