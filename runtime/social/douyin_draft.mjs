@@ -421,16 +421,22 @@ async function uploadDouyinVideoWithRetry(page, filePath) {
         const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
         const hasTitle = !!document.querySelector('input[placeholder*="填写作品标题"]');
         const failed = /上传失败|上传异常|上传中断|网络异常|网络错误|转码失败/.test(body);
-        const pctMatch = body.match(/(?:已上传|上传中|正在上传)[^\d%]{0,8}(\d{1,3})\s*%/) || body.match(/\b(\d{1,2})\s*%/);
-        const pct = pctMatch ? Number(pctMatch[1]) : null;
         const hasCancel = /取消上传/.test(body);
+        const explicitDone = /上传成功|重新上传|更换视频/.test(body) && !hasCancel;
+        const progEl = document.querySelector('[class*="upload"] [class*="progress"], [class*="upload"] [role="progressbar"]');
+        const progTxt = progEl ? (progEl.innerText || progEl.getAttribute('aria-valuenow') || '').trim() : '';
+        const pctMatch =
+          body.match(/(?:已上传|上传中|正在上传|上传进度)[^\d%]{0,8}(\d{1,3})\s*%/) ||
+          ((hasCancel || /上传中|正在上传/.test(body)) && progTxt ? progTxt.match(/(\d{1,3})\s*%?/) : null);
+        const pct = pctMatch ? Number(pctMatch[1]) : null;
         const uploading =
           !failed &&
+          !explicitDone &&
           (hasCancel ||
             /上传中|正在上传|上传过程中|等待上传|校验中|转码中|视频处理中/.test(body) ||
             (pct !== null && pct < 100));
         const doneSignal =
-          /上传成功|重新上传|更换视频/.test(body) ||
+          explicitDone ||
           Array.from(document.querySelectorAll('video')).some((v) => v.readyState >= 1 || !!(v.currentSrc || v.src));
         return { hasTitle, failed, uploading, pct, doneSignal };
       });

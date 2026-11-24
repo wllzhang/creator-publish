@@ -74,12 +74,8 @@ export function runEgoMjs(mjsPath, { timeoutMs = 600_000, missingCode = 3, missi
   const r = spawnSync(exe, ['nodejs', '-e', expr], {
     env: scrubbedEnv(env || {}),
     timeout: timeoutMs,
-    stdio: 'pipe',
-    encoding: 'utf8',
+    stdio: 'inherit',
   });
-
-  if (r.stdout) process.stdout.write(r.stdout);
-  if (r.stderr) process.stderr.write(r.stderr);
 
   try {
     fs.unlinkSync(runnerPath);
