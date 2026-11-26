@@ -15,8 +15,9 @@ allowed_modes: [draft, submit]
 | profileId | yes | ego profile |
 | title | yes | string |
 | body / body-file | yes | text value, or absolute path to text/markdown file |
-| cover | yes | absolute path to cover image |
+| cover | no | absolute path to cover image (optional; omitted when downgraded) |
 | category | no | platform category string |
+| trial | no | trial reading percentage (15–85, default 75) |
 | result-file | no | absolute path to output result JSON |
 
 ## run

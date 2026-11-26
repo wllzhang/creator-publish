@@ -144,7 +144,7 @@ async function findDraftEditUrl(page, token, targetTitle) {
   return fromDom;
 }
 
-const task = await taskSpace('wechat-mp-original-and-comment', { profileId });
+const task = await taskSpace('cp-wxmp-' + Date.now(), { profileId });
 const page = task.page('p1');
 
 try {
@@ -355,5 +355,5 @@ try {
   console.log('[wxmp] after save:', JSON.stringify(afterCheck));
   console.log('WECHAT_MP_ORIGINAL_SAVED', JSON.stringify({ originalDeclared, commentEnabled }));
 } finally {
-  await task.finish({ keep: [] });
+  await task.finish({ keep: job.keepOpen ? [page.label || 'p1'] : [] });
 }

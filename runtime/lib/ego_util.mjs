@@ -60,9 +60,8 @@ export function runEgoMjs(mjsPath, { timeoutMs = 600_000, missingCode = 3, missi
     .map(([k, v]) => `process.env[${JSON.stringify(k)}] = ${JSON.stringify(String(v).replace(/\\/g, '/'))};`)
     .join('\n');
 
-  const runnerPath = path.join(
-    path.dirname(abs),
-    `.ego-runner-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.mjs`,
+  const runnerPath = tmpJoin(
+    `creator-publish-ego-runner-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.mjs`,
   );
   const targetUrl = pathToFileURL(abs).href;
   const runnerContent = `${prelude}\nawait import(${JSON.stringify(targetUrl)});\n`;

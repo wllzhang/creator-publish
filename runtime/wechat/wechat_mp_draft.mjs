@@ -320,6 +320,7 @@ try {
           comment: !noComment,
           onlyFansComment,
           shotDir,
+          keepOpen: args['keep-open'] === true || args['keep-open'] === 'true',
         },
         null,
         2,

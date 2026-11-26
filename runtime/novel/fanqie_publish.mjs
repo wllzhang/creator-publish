@@ -26,14 +26,13 @@ function readBody(args) {
 const args = parseArgs();
 const profileId = need(args, 'profile-id');
 const title = need(args, 'title');
-const cover = path.resolve(need(args, 'cover'));
-if (!fs.existsSync(cover)) {
+const cover = args.cover ? path.resolve(args.cover) : null;
+if (cover && !fs.existsSync(cover)) {
   console.error('cover not found:', cover);
   process.exit(2);
 }
-const hanzi = (title.match(/[\u4e00-\u9fa5]/g) || []).length;
-if (hanzi > TITLE_MAX) {
-  console.error(`title hanzi ${hanzi} > ${TITLE_MAX}: ${title}`);
+if ([...title].length > TITLE_MAX) {
+  console.error(`title length ${[...title].length} > ${TITLE_MAX}: ${title}`);
   process.exit(2);
 }
 let body;
@@ -47,7 +46,7 @@ const category = args.category || '都市日常';
 const resultPath = args['result-file']
   ? path.resolve(args['result-file'])
   : tmpJoin('creator-publish-fanqie-result.json');
-const plan = { title, body, category, cover: cover.replace(/\\/g, '/'), result_file: resultPath };
+const plan = { title, body, category, cover: cover ? cover.replace(/\\/g, '/') : null, result_file: resultPath };
 console.log(JSON.stringify({ ...plan, body: plan.body.slice(0, 60) + '…' }, null, 2));
 if (args.check) process.exit(0);
 
@@ -59,7 +58,7 @@ const cfg = {
   body: plan.body,
   category: plan.category,
   cover: plan.cover,
-  trial: Number(args.trial || 99),
+  trial: Number(args.trial || 75),
   ai: !args['no-ai'],
   submit: !!args.submit,
   result_file: resultPath,

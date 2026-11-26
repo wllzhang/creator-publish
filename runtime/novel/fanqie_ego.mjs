@@ -331,8 +331,9 @@ try {
     }
   }
 
-  // 8. 试读比例
+  // 8. 试读比例（点击激活段落辅助线，再精确点击最接近目标百分比的段落分割线）
   try {
+    const targetTrial = Math.max(15, Math.min(85, Number(cfg.trial || 75)));
     let payReady = false;
     for (let i = 0; i < 6; i++) {
       payReady = await page.evaluate(() => {
@@ -344,25 +345,53 @@ try {
     }
 
     if (payReady) {
-      const currentPayText = await page.evaluate(() => {
-        return document.querySelector(".publish-short-config-pay-location-wrapper")?.innerText.trim() || "";
+      await beforeClick("激活试读卡点设置");
+      await page.evaluate(() => {
+        const w = document.querySelector(".publish-short-config-pay-location-wrapper");
+        (w?.closest("button") || w)?.click();
       });
-      if (!/\d+%/.test(currentPayText)) {
-        await beforeClick("打开试读设置");
-        await page.evaluate(() => {
-          document.querySelector(".publish-short-config-pay-location-wrapper")?.click();
-        });
-        await humanPause("mid", "试读弹层");
-        await beforeClick("保存试读比例");
-        await page.evaluate(() => {
-          const ok = [...document.querySelectorAll("button")].find(b => b.innerText && (b.innerText.trim() === "确定" || b.innerText.trim() === "保存"));
-          if (ok) ok.click();
-        });
-        step("已设置试读比例");
-        await humanPause("short", "试读保存后");
-      } else {
-        step("试读比例已存在: " + currentPayText);
-      }
+      await sleep(1500);
+
+      await page.evaluate((targetPct) => {
+        const paras = [...document.querySelectorAll(".ProseMirror > p")].filter(
+          (p) => (p.innerText || "").trim().length > 0
+        );
+        const selections = [...document.querySelectorAll(".payNode-helper-wrap-line-selection")];
+        if (!paras.length || !selections.length) return;
+        const lengths = paras.map((p) => (p.innerText || "").replace(/\s/g, "").length);
+        const total = lengths.reduce((a, b) => a + b, 0) || 1;
+        let cum = 0;
+        let bestIdx = 0;
+        let bestDiff = 999;
+        for (let i = 0; i < lengths.length; i++) {
+          cum += lengths[i];
+          const pct = (cum / total) * 100;
+          const diff = Math.abs(pct - targetPct);
+          if (diff < bestDiff && i < selections.length) {
+            bestDiff = diff;
+            bestIdx = i;
+          }
+        }
+        const sel = selections[bestIdx];
+        if (sel) {
+          sel.scrollIntoView({ block: "center" });
+          const opts = { bubbles: true, cancelable: true, view: window };
+          sel.dispatchEvent(new MouseEvent("mouseover", opts));
+          sel.dispatchEvent(new MouseEvent("mousedown", opts));
+          sel.dispatchEvent(new MouseEvent("mouseup", opts));
+          sel.dispatchEvent(new MouseEvent("click", opts));
+          sel.click();
+        }
+      }, targetTrial);
+      await sleep(1000);
+
+      const actualPay = await page.evaluate(() => ({
+        text: document.querySelector(".publish-short-config-pay-location-text")?.innerText?.trim() || "",
+        badge: document.querySelector(".serial-pay-node-badge")?.innerText?.trim() || "",
+      }));
+      const actualText = actualPay.text || actualPay.badge || "已设置";
+      step(`已设置试读比例: ${actualText} (目标 ${targetTrial}%)`);
+      await humanPause("short", "试读保存后");
     } else {
       warn("试读比例按钮处于禁用状态，跳过");
     }

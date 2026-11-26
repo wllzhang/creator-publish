@@ -70,6 +70,7 @@ const job = {
   // video platforms
   video: absOrNull(args.video),
   title: args.title || null,
+  shortTitle: args['short-title'] || null,
   topics,
   cover: absOrNull(args.cover),
   body: readMaybeFile(args.body, args['body-file']),
