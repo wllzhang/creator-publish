@@ -1,7 +1,9 @@
 /**
- * 小红书草稿。job: profileId, images[], title, body?, topics?, hotspot?, activity?, autoHotspot?, shotDir?
+ * 小红书草稿（支持图文 images[] 与视频 video + cover? 双模式）。
+ * job: profileId, (images[] | video, cover?), title, body?, topics?, aiGenerated?, hotspot?, activity?, autoHotspot?, shotDir?
  * 话题：点「话题」→ 键入词条 → 优先点选实时热门下拉联想生成 <a class="tiptap-topic">（未匹配则空格兜底）；默认勾选原创声明。
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { humanPause, humanMouseClick } from '../lib/pace.mjs';
 import { loadJob, abs } from '../lib/load_job.mjs';
@@ -15,10 +17,15 @@ import {
   parseScheduleTime,
   suppressNativeFileDialog,
 } from '../lib/ego_dom.mjs';
+import { declareXhsAiGenerated } from '../lib/ai_declare.mjs';
 
 const { job } = loadJob();
+const videoPath = job.video ? abs(job.video) : null;
+const coverPath = job.cover ? abs(job.cover) : null;
 const images = (job.images || []).map((p) => abs(p)).filter(Boolean);
-const title = (job.title || '').slice(0, 20);
+const isVideoMode = Boolean(videoPath);
+const aiGenerated = job.aiGenerated === true;
+const rawTitle = String(job.title || '').trim();
 const desc = job.body || '';
 const topicsList = normalizeTopics(job.topics);
 const autoHotspot = job.autoHotspot !== false;
@@ -38,11 +45,272 @@ if (!desc) {
     .join('');
 }
 
-if (!images.length) throw new Error('job 需要 images[]（绝对路径列表）');
-if (!title) throw new Error('job 需要 title');
+if (!isVideoMode && !images.length) throw new Error('job 需要 images[] 或 video（绝对路径）');
+if (isVideoMode && !fs.existsSync(videoPath.replace(/\//g, path.sep))) {
+  throw new Error(`视频文件不存在: ${videoPath}`);
+}
+if (!rawTitle) throw new Error('job 需要 title');
 
 const task = await taskSpace('cp-xhs-' + Date.now(), { profileId: job.profileId });
 const page = task.page('p1');
+
+function truncateWeightedTitle(text, limit = 20) {
+  const chars = Array.from(String(text || '').trim());
+  const weightOf = (ch) => (ch.codePointAt(0) <= 0x7f ? 0.5 : 1);
+  let total = chars.reduce((s, c) => s + weightOf(c), 0);
+  if (total <= limit) return chars.join('');
+  // First try stripping spaces around punctuation / ASCII runs
+  const compact = chars.join('').replace(/\s*([｜|：:·—-])\s*/g, '$1').replace(/\s+/g, '');
+  const compactChars = Array.from(compact);
+  total = compactChars.reduce((s, c) => s + weightOf(c), 0);
+  if (total <= limit) return compact;
+  let acc = 0;
+  let out = '';
+  for (const ch of compactChars) {
+    const w = weightOf(ch);
+    if (acc + w > limit) break;
+    acc += w;
+    out += ch;
+  }
+  return out;
+}
+
+async function dismissPopups() {
+  for (let i = 0; i < 4; i++) {
+    const dismissed = await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('button, span, div')).find((el) => {
+        if (el.closest('.main-cover-editor-modal, .cover-modal')) return false;
+        const dlg = el.closest('.d-modal, [role="dialog"]');
+        if (dlg && /原创声明须知|笔记完成原创声明/.test(dlg.innerText || '')) return false;
+        const r = el.getBoundingClientRect();
+        const t = (el.innerText || '').replace(/\s+/g, '').trim();
+        return r.width > 0 && r.height > 0 && el.childElementCount <= 1 && /^(我知道了|知道了)$/.test(t);
+      });
+      if (btn) {
+        btn.click();
+        return (btn.innerText || '').trim();
+      }
+      return null;
+    });
+    if (!dismissed) break;
+    console.log('[xhs] 已关闭引导弹窗:', dismissed);
+    await humanPause(500, 800);
+  }
+}
+
+async function uploadVideoAndWait(fileAbs) {
+  const tabInfo = await page.evaluate(() => {
+    const els = Array.from(document.querySelectorAll('div, span, button')).filter((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && el.childElementCount <= 1;
+    });
+    const vidTab = els.find((el) => (el.innerText || '').trim() === '上传视频');
+    if (vidTab) {
+      vidTab.click();
+      return { found: true };
+    }
+    return { found: false };
+  });
+  console.log('[xhs] 视频Tab:', JSON.stringify(tabInfo));
+  await humanPause(1500, 2500, '确认视频Tab', 'xhs');
+
+  let inputFound = false;
+  for (let i = 0; i < 20; i++) {
+    inputFound = await page.evaluate(() => {
+      const inputs = Array.from(document.querySelectorAll('input.upload-input, input[type="file"]'));
+      const vidInp = inputs.find((inp) => /(video|mp4|mov)/i.test(inp.accept || '')) || inputs[0];
+      if (!vidInp) return false;
+      vidInp.id = 'my_video_uploader_xhs';
+      return true;
+    });
+    if (inputFound) break;
+    await humanPause(600, 1000);
+  }
+  if (!inputFound) throw new Error('XHS_VIDEO_INPUT_NOT_FOUND');
+
+  await humanPause(1000, 1800, '选视频前', 'xhs');
+  await page.setInputFiles('#my_video_uploader_xhs', fileAbs);
+  console.log('[xhs] 已注入视频文件，等待上传完成...');
+
+  const timeoutMs = Number(process.env.XHS_UPLOAD_TIMEOUT_MS || 360_000);
+  const startMs = Date.now();
+  let settledTicks = 0;
+  let tick = 0;
+  let formReady = false;
+  while (Date.now() - startMs < timeoutMs) {
+    const st = await page.evaluate(() => {
+      const titleInp = document.querySelector('input[placeholder*="填写标题"]');
+      const body = (document.body?.innerText || '').replace(/\s+/g, ' ');
+      const uploading = /正在上传|上传中|转码中|解析中|视频处理中/.test(body);
+      return { hasTitle: !!titleInp, uploading };
+    });
+    if (tick % 4 === 0 || (st.hasTitle && !st.uploading)) {
+      console.log('[xhs] upload wait', Math.round((Date.now() - startMs) / 1000) + 's', JSON.stringify(st));
+    }
+    if (st.hasTitle && !st.uploading) {
+      settledTicks++;
+      if (settledTicks >= 2) {
+        formReady = true;
+        break;
+      }
+    } else {
+      settledTicks = 0;
+    }
+    tick++;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  if (!formReady) throw new Error('XHS_VIDEO_UPLOAD_TIMEOUT');
+  await humanPause(2000, 3500, '视频表单就绪', 'xhs');
+  await dismissPopups();
+}
+
+async function uploadVideoCover(coverFile) {
+  await dismissPopups();
+
+  let inputReady = false;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const thumbBox = await page.evaluate(() => {
+      const el = document.querySelector('.default--ai-cover-layout, .cover-edit-stack');
+      if (!el) return null;
+      el.scrollIntoView({ block: 'center' });
+      const r = el.getBoundingClientRect();
+      return r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    });
+    if (!thumbBox) {
+      console.warn('[xhs] 未找到封面缩略图容器');
+      return false;
+    }
+    await page.mouse.move(thumbBox.x, thumbBox.y);
+    await humanPause(650, 950);
+
+    const entryBox = await page.evaluate(() => {
+      const el = document.querySelector('.cover-edit-entry');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    });
+    const clickTarget = entryBox || thumbBox;
+    await humanMouseClick(page, clickTarget.x, clickTarget.y, { radius: 2, tag: 'xhs' });
+
+    for (let k = 0; k < 12; k++) {
+      await new Promise((r) => setTimeout(r, 500));
+      inputReady = await page.evaluate(() => !!document.querySelector('input[aria-label="上传封面图片"]'));
+      if (inputReady) break;
+    }
+    if (inputReady) break;
+    await dismissPopups();
+  }
+
+  if (!inputReady) {
+    console.warn('[xhs] 封面弹窗上传 input 未出现');
+    await safeShot(page, path.join(shotDir, 'xhs_cover_debug.png'));
+    return false;
+  }
+
+  await page.setInputFiles('input[aria-label="上传封面图片"]', coverFile);
+  console.log('[xhs] 已注入封面图，等待上传与完成按钮解锁...');
+
+  let enabled = false;
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 1200));
+    const st = await page.evaluate(() => {
+      const m = document.querySelector('.main-cover-editor-modal, .cover-modal');
+      const btn = m && Array.from(m.querySelectorAll('button')).find((b) => (b.innerText || '').replace(/\s+/g, '').trim() === '完成');
+      return btn ? { disabled: !!btn.disabled || (btn.className || '').includes('disabled') || btn.getAttribute('aria-disabled') === 'true' } : { disabled: true };
+    });
+    if (st.disabled === false) {
+      enabled = true;
+      break;
+    }
+  }
+  if (!enabled) {
+    console.warn('[xhs] 封面完成按钮解锁超时');
+    await safeShot(page, path.join(shotDir, 'xhs_cover_debug.png'));
+    await page.keyboard.press('Escape');
+    return false;
+  }
+
+  await humanPause(1500, 2100, '封面预览稳定', 'xhs');
+
+  const clickModalDone = async () => {
+    const rect = await page.evaluate(() => {
+      const m = document.querySelector('.main-cover-editor-modal, .cover-modal');
+      const btn = m && Array.from(m.querySelectorAll('button')).find((b) => (b.innerText || '').replace(/\s+/g, '').trim() === '完成');
+      if (!btn) return null;
+      const r = btn.getBoundingClientRect();
+      return r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2, disabled: !!btn.disabled } : null;
+    });
+    if (rect && !rect.disabled) {
+      await humanMouseClick(page, rect.x, rect.y, { radius: 2, tag: 'xhs' });
+      return true;
+    }
+    return false;
+  };
+
+  await clickModalDone();
+  let closed = false;
+  for (let sec = 0; sec < 15; sec++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const open = await page.evaluate(() => {
+      const m = document.querySelector('.main-cover-editor-modal');
+      return !!(m && m.getBoundingClientRect().width > 100);
+    });
+    if (!open) {
+      closed = true;
+      break;
+    }
+    if (sec === 4) {
+      await clickModalDone();
+    }
+  }
+
+  if (closed) {
+    console.log('XHS_VIDEO_COVER_SET');
+    await humanPause(800, 1400, '封面确认后', 'xhs');
+    return true;
+  }
+  console.warn('[xhs] 封面弹窗未能自动关闭，跳过封面避免阻断草稿保存');
+  await safeShot(page, path.join(shotDir, 'xhs_cover_debug.png'));
+  await page.keyboard.press('Escape');
+  await humanPause(600, 1000);
+  return false;
+}
+
+async function fillTitle(textToWrite) {
+  const writeVal = async (val) =>
+    page.evaluate((tText) => {
+      const titleInp = document.querySelector('input[placeholder*="填写标题"]');
+      if (!titleInp) return { ok: false };
+      titleInp.focus();
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      if (nativeSetter) nativeSetter.call(titleInp, tText);
+      else titleInp.value = tText;
+      titleInp.dispatchEvent(new Event('input', { bubbles: true }));
+      titleInp.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, value: titleInp.value, maxLength: titleInp.maxLength };
+    }, val);
+
+  const res = await writeVal(textToWrite);
+  await humanPause(500, 900);
+  const counterInfo = await page.evaluate(() => {
+    const inp = document.querySelector('input[placeholder*="填写标题"]');
+    const box = inp?.closest('[class*="title"], [class*="input"], div')?.parentElement;
+    const m = (box?.innerText || '').match(/(\d+)\s*\/\s*(\d+)/);
+    return {
+      value: inp?.value || '',
+      over: m ? Number(m[1]) > Number(m[2]) : false,
+      limit: m ? Number(m[2]) : 20,
+      counter: m ? m[0] : null,
+    };
+  });
+  if (counterInfo.over || (res.value && res.value !== textToWrite)) {
+    const safeTitle = truncateWeightedTitle(textToWrite, counterInfo.limit || 20);
+    if (safeTitle && safeTitle !== counterInfo.value) {
+      await writeVal(safeTitle);
+      console.log(`[xhs] 标题长度超出上限(${counterInfo.counter || 'maxLength'})，已智能调整为: ${safeTitle}`);
+    }
+  }
+}
 
 async function focusEditorEnd() {
   await page.evaluate(() => {
@@ -401,37 +669,34 @@ try {
     throw new Error('NEED_LOGIN_XHS');
   }
 
-  await page.evaluate(() => {
-    const tabs = Array.from(document.querySelectorAll('div, span, button'));
-    const imgTab = tabs.find((el) => el.innerText?.trim() === '上传图文' || el.innerText?.trim() === '图文');
-    imgTab?.click();
-  });
-  await humanPause(2000, 4000, '切图文', 'xhs');
-
-  console.log(`准备上传 (${images.length})`);
-  await page.evaluate(() => {
-    const inp = document.querySelector('input.upload-input, input[type="file"]');
-    if (inp) inp.id = 'my_batch_uploader_xhs';
-  });
-  await humanPause(1500, 3000, '选图前', 'xhs');
-  await page.setInputFiles('#my_batch_uploader_xhs', images);
-  await humanPause(15000, 25000, '图片上传', 'xhs');
-
-  await humanPause(2000, 4000, '填标题前', 'xhs');
-  await page.evaluate((tText) => {
-    const titleInp = document.querySelector('input[placeholder*="填写标题"]');
-    if (titleInp) {
-      titleInp.focus();
-      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-      if (nativeSetter) nativeSetter.call(titleInp, tText);
-      else titleInp.value = tText;
-      titleInp.dispatchEvent(new Event('input', { bubbles: true }));
-      titleInp.dispatchEvent(new Event('change', { bubbles: true }));
+  if (isVideoMode) {
+    await uploadVideoAndWait(videoPath);
+    if (coverPath && fs.existsSync(coverPath.replace(/\//g, path.sep))) {
+      await uploadVideoCover(coverPath);
     }
-  }, title);
-  await humanPause(3000, 5500, '标题后', 'xhs');
+  } else {
+    await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll('div, span, button'));
+      const imgTab = tabs.find((el) => el.innerText?.trim() === '上传图文' || el.innerText?.trim() === '图文');
+      imgTab?.click();
+    });
+    await humanPause(2000, 4000, '切图文', 'xhs');
 
-  await humanPause(2000, 4000, '填正文前', 'xhs');
+    console.log(`准备上传 (${images.length})`);
+    await page.evaluate(() => {
+      const inp = document.querySelector('input.upload-input, input[type="file"]');
+      if (inp) inp.id = 'my_batch_uploader_xhs';
+    });
+    await humanPause(1500, 3000, '选图前', 'xhs');
+    await page.setInputFiles('#my_batch_uploader_xhs', images);
+    await humanPause(15000, 25000, '图片上传', 'xhs');
+  }
+
+  await humanPause(1500, 3000, '填标题前', 'xhs');
+  await fillTitle(rawTitle);
+  await humanPause(2500, 4500, '标题后', 'xhs');
+
+  await humanPause(1500, 3000, '填正文前', 'xhs');
   await page.evaluate((dHtml) => {
     const editor = document.querySelector('.tiptap.ProseMirror');
     if (editor) {
@@ -447,6 +712,15 @@ try {
 
   await enableOriginalDeclaration();
   await humanPause(800, 1600, '原创声明后', 'xhs');
+
+  if (aiGenerated) {
+    try {
+      await declareXhsAiGenerated(page);
+    } catch (e) {
+      console.warn('[xhs] 内容类型声明 note:', String(e?.message || e).slice(0, 120));
+    }
+    await humanPause(600, 1200, 'AI声明后', 'xhs');
+  }
 
   if (schedule) {
     try {
@@ -540,6 +814,20 @@ try {
     }
   }
 
+  if (isVideoMode) {
+    await page.evaluate(() => {
+      const topAnchor = document.querySelector('.default--ai-cover-layout, .cover-plugin-title, input[placeholder*="填写标题"]');
+      if (topAnchor) topAnchor.scrollIntoView({ block: 'start' });
+      else window.scrollTo(0, 0);
+    });
+    await humanPause(500, 800);
+    await safeShot(page, path.join(shotDir, 'xhs_before_draft_top.png'));
+  }
+  await page.evaluate(() => {
+    const anchor = document.querySelector('[lass="declaration-wrapper"], .original-wrapper');
+    anchor?.scrollIntoView({ block: 'center' });
+  });
+  await humanPause(400, 700);
   await safeShot(page, path.join(shotDir, 'xhs_before_draft.png'), { fullPage: true });
 
   await humanPause(3000, 6000, '点暂存前', 'xhs');

@@ -37,6 +37,16 @@ function readMaybeFile(value, fileFlag) {
   return String(value);
 }
 
+function parseBoolFlag(val, defaultVal = false) {
+  if (val === undefined || val === null || val === '') return defaultVal;
+  if (typeof val === 'boolean') return val;
+  const norm = String(val).trim().toLowerCase();
+  if (norm === 'true' || norm === 'yes' || norm === '1' || norm === 'on') return true;
+  if (norm === 'false' || norm === 'no' || norm === '0' || norm === 'off') return false;
+  console.error(`invalid boolean flag value: ${val}`);
+  process.exit(2);
+}
+
 const args = parseArgs();
 const platform = need(args, 'platform');
 if (!PLATFORMS.has(platform)) {
@@ -57,6 +67,7 @@ const autoHotspot = !(
   args['no-auto-hotspot'] === 'true' ||
   args['auto-hotspot'] === 'false'
 );
+const aiGenerated = parseBoolFlag(args['ai-generated'], false);
 const rawSchedule = args['schedule-time'] || args.schedule || null;
 const scheduleInfo = rawSchedule ? parseScheduleTime(rawSchedule) : null;
 const scheduleTime = scheduleInfo ? scheduleInfo.dateTimeStr : null;
@@ -67,6 +78,7 @@ const job = {
   profileId,
   scheduleTime,
   keepOpen: args['keep-open'] === true || args['keep-open'] === 'true',
+  aiGenerated,
   // video platforms
   video: absOrNull(args.video),
   title: args.title || null,

@@ -17,6 +17,7 @@ import {
   parseScheduleTime,
   suppressNativeFileDialog,
 } from '../lib/ego_dom.mjs';
+import { declareBilibiliAiGenerated } from '../lib/ai_declare.mjs';
 
 function ensureCoverFile(videoFile, explicitCover) {
   if (explicitCover && fs.existsSync(explicitCover.replace(/\//g, path.sep))) {
@@ -62,6 +63,12 @@ function inferBilibiliPartition(title = '', tags = []) {
   }
   if (/数码|手机|芯片|半导体|显卡|cpu|电脑|平板|硬件|鸿蒙|安卓|ios|苹果|华为|小米/.test(combined)) {
     return '科技数码';
+  }
+  if (/猫|猫咪|狗|萌宠|宠物|三花|布偶|橘猫|汪星人|喵星人|动物/.test(combined)) {
+    return '动物';
+  }
+  if (/动画|动漫|番剧|二次元|短剧|漫剧|手绘/.test(combined)) {
+    return '动画';
   }
   if (/科普|原理|为什么|揭秘|冷知识|物理|化学|生物|地理|历史|经济|财金|法律|常识|机制/.test(combined)) {
     return '知识';
@@ -739,6 +746,14 @@ try {
       .filter(Boolean),
   );
   console.log(`BILIBILI_FINAL_TAGS: ${finalTags.length}/10`, JSON.stringify(finalTags));
+
+  if (job.aiGenerated === true) {
+    try {
+      await declareBilibiliAiGenerated(page);
+    } catch (e) {
+      console.warn('[bili] 创作声明 note:', String(e?.message || e).slice(0, 120));
+    }
+  }
 
   if (schedule) {
     try {

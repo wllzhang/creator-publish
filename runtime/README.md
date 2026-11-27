@@ -23,9 +23,10 @@ node runtime/run.mjs --platform <id> ...
 ### 社媒示例
 
 ```powershell
-node runtime/run.mjs --platform douyin --profile-id "Profile 2" --video "C:\abs\video.mp4" --title "Title" --topics "a,b"
+node runtime/run.mjs --platform douyin --profile-id "Profile 2" --video "C:\abs\video.mp4" --title "Title" --topics "a,b" --ai-generated
 node runtime/run.mjs --platform xiaohongshu --profile-id "Profile 2" --images "C:\a.jpg,C:\b.jpg" --title "Title" --body "caption"
-node runtime/run.mjs --platform weixin_channels --profile-id "Profile 2" --video "C:\abs\视频.mp4" --title "短标题" --body "描述"
+node runtime/run.mjs --platform xiaohongshu --profile-id "Profile 2" --video "C:\abs\video.mp4" --cover "C:\abs\cover.png" --title "Title" --body "caption" --ai-generated
+node runtime/run.mjs --platform weixin_channels --profile-id "Profile 2" --video "C:\abs\视频.mp4" --title "短标题" --body "描述" --ai-generated
 ```
 
 视频号须用**可用成片**（过短残片可能无法保存草稿）。

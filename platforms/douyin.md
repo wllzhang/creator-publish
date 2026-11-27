@@ -18,6 +18,7 @@ allowed_modes: [draft, submit]
 | topics | no | topic/hashtag list（抖音单条最多支持 5 个 `#话题`，超出会自动截断前 5 个以避免编辑器粘连） |
 | body | no | optional description placed before topics |
 | hotspot / activity | no | optional explicit hotspot / official activity keyword(s); defaults to auto-derived keywords from `topics` + `title` |
+| ai-generated | no | boolean flag（默认 `false`；传 `--ai-generated` 时在「自主声明」选择 `内容由AI生成` 并确认 → `DOUYIN_AI_DECLARED`） |
 | no-auto-hotspot / shot-dir | no | disable automatic hotspot/topic/activity matching (`--no-auto-hotspot`) or set screenshot directory (`--shot-dir`) |
 
 ## notes

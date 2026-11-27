@@ -17,6 +17,7 @@ import {
   parseScheduleTime,
   suppressNativeFileDialog,
 } from '../lib/ego_dom.mjs';
+import { declareChannelsAiGenerated } from '../lib/ai_declare.mjs';
 
 function toChannelsShortTitle(raw) {
   const s = String(raw || '')
@@ -494,6 +495,14 @@ try {
     }
   } catch (e) {
     console.warn('[wxch] 位置设置 note:', String(e?.message || e).slice(0, 100));
+  }
+
+  if (job.aiGenerated === true) {
+    try {
+      await declareChannelsAiGenerated(page);
+    } catch (e) {
+      console.warn('[wxch] 视频标注 note:', String(e?.message || e).slice(0, 120));
+    }
   }
 
   if (schedule) {

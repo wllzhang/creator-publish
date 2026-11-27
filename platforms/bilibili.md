@@ -17,6 +17,8 @@ allowed_modes: [draft, submit]
 | title | yes | title |
 | topics | no | tags（最多 10 个；开启自动关联热点且传入超过 8 个时保留 2 槽位给实时「推荐标签」） |
 | cover | no | cover image |
+| partition / category | no | B站分区（未显式传参时按标题与标签智能推断，支持 `动物`/`动画`/`汽车`/`人工智能`/`科技数码`/`知识`） |
+| ai-generated | no | boolean flag（默认 `false`；传 `--ai-generated` 时在「创作声明」选择 `含AI生成内容` → `BILIBILI_AI_DECLARED`） |
 | hotspot / activity | no | optional explicit topic/activity search keyword(s); defaults to auto-derived keywords from `topics` + `title` |
 | no-auto-hotspot / shot-dir | no | disable auto `推荐标签` / `参与话题` association or set screenshot directory |
 

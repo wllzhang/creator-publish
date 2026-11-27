@@ -16,6 +16,7 @@ import {
   parseScheduleTime,
   suppressNativeFileDialog,
 } from '../lib/ego_dom.mjs';
+import { declareDouyinAiGenerated } from '../lib/ai_declare.mjs';
 
 const { job } = loadJob();
 const videoPath = abs(job.video);
@@ -570,6 +571,14 @@ try {
       await associateDouyinHotspotAndActivity(page);
     } catch (e) {
       console.warn('[dy] hotspot/activity note:', String(e?.message || e).slice(0, 120));
+    }
+  }
+
+  if (job.aiGenerated === true) {
+    try {
+      await declareDouyinAiGenerated(page);
+    } catch (e) {
+      console.warn('[dy] 自主声明 note:', String(e?.message || e).slice(0, 120));
     }
   }
 

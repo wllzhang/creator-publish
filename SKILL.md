@@ -22,6 +22,7 @@ node runtime/run.mjs --platform <id> [profileId + platform fields] [mode?]
 | `platform` | see `platforms/` |
 | `mode` | `draft` = stop before final publish; `submit` = confirm. Omit → platform `default_mode` |
 | `hotspot` / `activity` / `no-auto-hotspot` | Social platforms auto-associate platform hotspot/trending suggestions/activities by default from `topics` + `title`; pass `--hotspot`/`--activity` to override or `--no-auto-hotspot` to disable |
+| `ai-generated` | Social platforms (`douyin` / `xiaohongshu` / `weixin_channels` / `bilibili`): pass `--ai-generated` to auto-select the platform's "AI-generated / AI-synthesized content" disclosure (default `false`); `kdp_ebook` uses `yes` \| `no` |
 | `shot-dir` | Optional directory for before/after draft proof screenshots |
 | `keep-open` | Optional flag (`--keep-open`) to retain the browser tab after finishing instead of closing the Ego taskSpace |
 
@@ -29,10 +30,10 @@ Fields per platform: [`platforms/`](platforms/). Summary:
 
 | platform | fields |
 |---|---|
-| douyin | `video`, `title`, optional `topics`, `cover`, `body` |
-| bilibili | `video`, `title`, optional `topics`, `cover`, `body` |
-| weixin_channels | `video`, `title`, optional `topics`, `cover`, `body` |
-| xiaohongshu | `images` (file list), `title`, optional `body`/`body-file`, `topics` |
+| douyin | `video`, `title`, optional `topics`, `cover`, `body`, `ai-generated` |
+| bilibili | `video`, `title`, optional `topics`, `cover`, `body`, `partition`, `ai-generated` |
+| weixin_channels | `video`, `title`, optional `topics`, `cover`, `body`, `ai-generated` |
+| xiaohongshu | `images` (file list) OR `video` (+ optional `cover`), `title`, optional `body`/`body-file`, `topics`, `ai-generated` |
 | wechat_mp | `api-env`, `title`, `html`/`html-file`, `cover`, optional `body-images`, `profile-id`（用于 API 入库后经 Ego 自动声明原创并复核开启留言）, `no-original`, `no-comment`, `only-fans-comment`; 默认 `need_open_comment=1` 开启留言; egress 从 `--egress` / env / api-env（含已有 `WECHAT_MP_EGRESS_IP`）解析，不走 VPN |
 | fanqie_short | `title`, `body`/`body-file`, optional `cover`, `category`, `trial` (default `75`) |
 | ximalaya_audio | `album-id`, `title`, `mp3`, `intro`/`intro-file`, optional `cover`,`lrc`,`result-file` |

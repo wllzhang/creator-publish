@@ -18,6 +18,7 @@ allowed_modes: [draft, submit]
 | body | no | description（未传则回退为 `title`） |
 | topics | no | topic/hashtag list（优先点选 `#话题` 下拉热词；无下拉时敲空格 `Space` 生成真实可点击蓝色 `<span class="hl topic">` 标签） |
 | hotspot / activity | no | optional explicit topic/activity match keyword(s); defaults to auto-derived keywords from `topics` + `title` |
+| ai-generated | no | boolean flag（默认 `false`；传 `--ai-generated` 时在 `wujie-shadow`「视频标注」选择 `含AI生成内容` → `WXCH_AI_DECLARED`） |
 | no-auto-hotspot / shot-dir | no | disable auto recommended-topic / activity matching or set screenshot directory |
 
 ## notes

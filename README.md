@@ -31,7 +31,7 @@ node runtime/run.mjs --platform <id> ...
 | `douyin` | Ego browser | draft | `node runtime/run.mjs --platform douyin --profile-id "Profile 2" --video "C:\abs\video.mp4" --title "Title" --topics "a,b"` |
 | `bilibili` | Ego browser | draft | `node runtime/run.mjs --platform bilibili --profile-id "Profile 2" --video "C:\abs\video.mp4" --title "Title" --topics "a,b"` |
 | `weixin_channels` | Ego browser | draft | `node runtime/run.mjs --platform weixin_channels --profile-id "Profile 2" --video "C:\abs\video.mp4" --title "Short title" --body "Caption"` |
-| `xiaohongshu` | Ego browser | draft | `node runtime/run.mjs --platform xiaohongshu --profile-id "Profile 2" --images "C:\a.jpg,C:\b.jpg" --title "Title" --body "Caption"` |
+| `xiaohongshu` | Ego browser | draft | `node runtime/run.mjs --platform xiaohongshu --profile-id "Profile 2" --images "C:\a.jpg,C:\b.jpg" --title "Title" --body "Caption"` (or `--video "C:\abs\v.mp4" --cover "C:\abs\c.png" --ai-generated`) |
 | `fanqie_short` | Ego browser | submit (omit `--submit` for draft) | `node runtime/run.mjs --platform fanqie_short --profile-id "Profile 2" --title "Book" --body-file "C:\abs\body.md" --cover "C:\abs\cover.png"` |
 | `ximalaya_audio` | Ego browser | submit (omit `--submit` for draft) | `node runtime/run.mjs --platform ximalaya_audio --profile-id "Profile 2" --album-id "123" --title "Title" --mp3 "C:\abs\a.mp3" --intro-file "C:\abs\intro.txt"` |
 | `kdp_ebook` | Ego browser | submit (omit `--submit` for draft) | `node runtime/run.mjs --platform kdp_ebook --profile-id "Profile 2" --epub "C:\abs\book.epub" --cover "C:\abs\cover.jpg" --title "Title"` |
