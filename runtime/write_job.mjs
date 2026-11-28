@@ -12,10 +12,11 @@ import { parseScheduleTime } from './lib/ego_dom.mjs';
 
 const PLATFORMS = new Set([
   'douyin', 'bilibili', 'weixin_channels', 'xiaohongshu', 'wechat_mp',
-  'fanqie_short', 'ximalaya_audio', 'kdp_ebook',
+  'fanqie_short', 'ximalaya_audio', 'kdp_ebook', 'x', 'youtube',
 ]);
 const DEFAULT_MODE = {
   douyin: 'draft', bilibili: 'draft', weixin_channels: 'draft', xiaohongshu: 'draft', wechat_mp: 'draft',
+  x: 'draft', youtube: 'draft',
   fanqie_short: 'submit', ximalaya_audio: 'submit', kdp_ebook: 'submit',
 };
 
@@ -61,6 +62,10 @@ const topics = splitList(args.topics || args.tags);
 const images = splitList(args.images).map((p) => absOrNull(p));
 const keywords = splitList(args.keywords);
 const mode = args.mode || DEFAULT_MODE[platform];
+if ((platform === 'x' || platform === 'youtube') && (args.submit || mode !== 'draft')) {
+  console.error(`Draft-only safety gate blocks submit on '${platform}'`);
+  process.exit(2);
+}
 const out = path.resolve(args.out || tmpJoin('creator-publish-job.json'));
 const autoHotspot = !(
   args['no-auto-hotspot'] === true ||

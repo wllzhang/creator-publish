@@ -34,6 +34,8 @@ Fields per platform: [`platforms/`](platforms/). Summary:
 | bilibili | `video`, `title`, optional `topics`, `cover`, `body`, `partition`, `ai-generated` |
 | weixin_channels | `video`, `title`, optional `topics`, `cover`, `body`, `ai-generated` |
 | xiaohongshu | `images` (file list) OR `video` (+ optional `cover`), `title`, optional `body`/`body-file`, `topics`, `ai-generated` |
+| x | `body`/`body-file` or `title`, optional `images` (≤4) OR `video`, `topics` (`draft` only) |
+| youtube | `video`, `title`, optional `body`/`body-file`, `topics`, `cover`, `ai-generated` (`draft` only) |
 | wechat_mp | `api-env`, `title`, `html`/`html-file`, `cover`, optional `body-images`, `profile-id`（用于 API 入库后经 Ego 自动声明原创并复核开启留言）, `no-original`, `no-comment`, `only-fans-comment`; 默认 `need_open_comment=1` 开启留言; egress 从 `--egress` / env / api-env（含已有 `WECHAT_MP_EGRESS_IP`）解析，不走 VPN |
 | fanqie_short | `title`, `body`/`body-file`, optional `cover`, `category`, `trial` (default `75`) |
 | ximalaya_audio | `album-id`, `title`, `mp3`, `intro`/`intro-file`, optional `cover`,`lrc`,`result-file` |

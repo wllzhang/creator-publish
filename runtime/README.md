@@ -14,6 +14,8 @@ node runtime/run.mjs --platform <id> ...
 | `bilibili` | write_job + Ego |
 | `weixin_channels` | write_job + Ego |
 | `xiaohongshu` | write_job + Ego |
+| `x` | write_job + Ego (`draft` only) |
+| `youtube` | write_job + Ego (`draft` only) |
 | `fanqie_short` | novel 适配器 |
 | `ximalaya_audio` | novel 适配器 |
 | `kdp_ebook` | novel 适配器 |
@@ -27,6 +29,8 @@ node runtime/run.mjs --platform douyin --profile-id "Profile 2" --video "C:\abs\
 node runtime/run.mjs --platform xiaohongshu --profile-id "Profile 2" --images "C:\a.jpg,C:\b.jpg" --title "Title" --body "caption"
 node runtime/run.mjs --platform xiaohongshu --profile-id "Profile 2" --video "C:\abs\video.mp4" --cover "C:\abs\cover.png" --title "Title" --body "caption" --ai-generated
 node runtime/run.mjs --platform weixin_channels --profile-id "Profile 2" --video "C:\abs\视频.mp4" --title "短标题" --body "描述" --ai-generated
+node runtime/run.mjs --platform x --profile-id "Profile 2" --body "Post text" --images "C:\a.png" --topics "AI,Dev"
+node runtime/run.mjs --platform youtube --profile-id "Profile 2" --video "C:\abs\video.mp4" --title "Video Title" --body "Description" --topics "tag1,tag2" --cover "C:\abs\cover.jpg"
 ```
 
 视频号须用**可用成片**（过短残片可能无法保存草稿）。

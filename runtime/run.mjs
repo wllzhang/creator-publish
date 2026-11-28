@@ -5,7 +5,7 @@
  *   node runtime/run.mjs --platform <id> [platform fields...] [--hotspot <kw>] [--activity <kw>] [--no-auto-hotspot] [--shot-dir <dir>]
  *
  * Routes:
- *   douyin | bilibili | weixin_channels | xiaohongshu  → write_job + Ego social
+ *   douyin | bilibili | weixin_channels | xiaohongshu | x | youtube  → write_job + Ego social
  *   fanqie_short | ximalaya_audio | kdp_ebook          → novel/*_publish.mjs
  *   gmail                                              → email/gmail_publish.mjs
  *   wechat_mp                                          → wechat/wechat_mp_draft.mjs
@@ -23,6 +23,8 @@ const SOCIAL = {
   bilibili: 'social/bilibili_draft.mjs',
   weixin_channels: 'social/channels_draft.mjs',
   xiaohongshu: 'social/xhs_draft.mjs',
+  x: 'social/x_draft.mjs',
+  youtube: 'social/youtube_draft.mjs',
 };
 
 const NOVEL = {
