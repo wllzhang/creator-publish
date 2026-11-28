@@ -43,8 +43,8 @@ node runtime/run.mjs --platform <id> ...
 ## 环境要求
 
 - Node.js 18+（微信公众号走白名单主机时，远端也需要 `node`）
-- [Ego Lite](https://ego) / `ego-browser`（浏览器类平台）
-- 微信公众号：`api-env` 中配置 `WECHAT_MP_APPID` / `WECHAT_MP_APPSECRET`；IP 白名单场景可选用 SSH egress（`WECHAT_MP_EGRESS` / `WECHAT_MP_EGRESS_SSH`）
+- [Ego Lite](https://ego) / `ego-browser`（浏览器类平台；在 Linux/Muse 侧严禁装 Playwright，可通过 `node runtime/remote_ego_dispatch.mjs` 派发本机 Ego 或离线入队）
+- 微信公众号：`api-env` 中配置 `WECHAT_MP_APPID` / `WECHAT_MP_APPSECRET`；IP 白名单场景可选用 SSH egress（`WECHAT_MP_EGRESS` / `WECHAT_MP_EGRESS_SSH` / `--ssh-key`）
 
 ## 硬性规则
 

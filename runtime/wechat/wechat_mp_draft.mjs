@@ -94,8 +94,31 @@ function mustOk(r, label) {
   return r;
 }
 
-function sshBase(host) {
-  return ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', host];
+function sshBase(host, sshKey) {
+  const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15'];
+  if (sshKey) args.push('-i', sshKey);
+  args.push(host);
+  return args;
+}
+
+function scpBase(sshKey) {
+  const args = ['-C', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15'];
+  if (sshKey) args.push('-i', sshKey);
+  return args;
+}
+
+function resolveSshKey(cliKey, fileEnv) {
+  const raw = String(
+    cliKey || process.env.WECHAT_MP_SSH_KEY || fileEnv.WECHAT_MP_SSH_KEY || '',
+  ).trim();
+  if (raw) {
+    return raw.startsWith('~/') ? path.join(os.homedir(), raw.slice(2)) : path.resolve(raw);
+  }
+  if (process.platform !== 'win32') {
+    const museKey = path.join(os.homedir(), '.ssh', 'id_ed25519_muse');
+    if (fs.existsSync(museKey)) return museKey;
+  }
+  return '';
 }
 
 function clearProxyEnv(env = process.env) {
@@ -151,12 +174,12 @@ function runLocalNode(common) {
 }
 
 function runSshEgress({
-  host, apiEnv, title, htmlFile, cover, bodyImages, digest, author, scheduleTime, noComment, onlyFansComment, out, egressNote, expectIp,
+  host, sshKey, apiEnv, title, htmlFile, cover, bodyImages, digest, author, scheduleTime, noComment, onlyFansComment, out, egressNote, expectIp,
 }) {
   const stamp = Date.now().toString(16);
   const remoteBase = `/tmp/creator_publish_wechat_${stamp}`;
-  const sshArgs = sshBase(host);
-  const scpOpts = ['-C', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15'];
+  const sshArgs = sshBase(host, sshKey);
+  const scpOpts = scpBase(sshKey);
 
   console.log(`[*] egress=ssh ${host} (${egressNote})`);
   if (expectIp) console.log(`[*] expected whitelist IP ${expectIp}`);
@@ -233,6 +256,7 @@ if (!fs.existsSync(API_DRAFT)) {
 
 const fileEnv = loadEnvFile(apiEnv);
 const resolved = resolveEgress(args.egress, fileEnv);
+const sshKey = resolveSshKey(args['ssh-key'], fileEnv);
 const expectIp = String(fileEnv.WECHAT_MP_EGRESS_IP || '').trim() || null;
 
 let htmlFile;
@@ -297,7 +321,7 @@ try {
     }
     runLocalNode(common);
   } else {
-    runSshEgress({ host: resolved.target, ...common });
+    runSshEgress({ host: resolved.target, sshKey, ...common });
   }
 
   // Post-step via Ego browser: declare Original (声明原创) & verify Comments (开启留言)

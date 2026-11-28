@@ -43,8 +43,8 @@ See [`platforms/`](platforms/) for required fields and [`runtime/README.md`](run
 ## Requirements
 
 - Node.js 18+ (WeChat remote egress also needs `node` on the whitelist host)
-- [Ego Lite](https://ego) / `ego-browser` for browser platforms
-- WeChat MP: `api-env` with `WECHAT_MP_APPID` / `WECHAT_MP_APPSECRET`; optional SSH egress when IP allowlist is used (`WECHAT_MP_EGRESS` / `WECHAT_MP_EGRESS_SSH`)
+- [Ego Lite](https://ego) / `ego-browser` for browser platforms (on Linux/Muse, dispatch to Windows desktop Ego via `node runtime/remote_ego_dispatch.mjs` without Playwright)
+- WeChat MP: `api-env` with `WECHAT_MP_APPID` / `WECHAT_MP_APPSECRET`; optional SSH egress when IP allowlist is used (`WECHAT_MP_EGRESS` / `WECHAT_MP_EGRESS_SSH` / `--ssh-key`)
 
 ## Hard rules
 

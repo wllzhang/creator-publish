@@ -60,4 +60,6 @@ Fields per platform: [`platforms/`](platforms/). Summary:
 - Every Ego `taskSpace` must use the given `profileId`
 - Random human pacing between UI actions
 - Media uploads/screenshots: absolute paths only
+- WeChat MP: pass `--ssh-key` (or `WECHAT_MP_SSH_KEY`) when calling Tencent/whitelist SSH egress from Linux/Muse (auto-uses `~/.ssh/id_ed25519_muse` if present)
+- Remote Ego dispatch (from Muse/Linux without Playwright): `node runtime/remote_ego_dispatch.mjs --platform <id> --profile-id "<id>" ...` (dispatches to Windows desktop Ego bridge or enqueues offline under `/home/hatch/work/publish_queue/`)
 - No tokens/cookies in the skill tree
