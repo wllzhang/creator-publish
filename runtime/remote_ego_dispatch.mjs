@@ -16,8 +16,10 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import tls from 'node:tls';
 import { parseArgs, need } from './lib/cli_args.mjs';
 
 const SOCIAL_DRAFT_ONLY = new Set([
@@ -89,46 +91,97 @@ export function defaultQueueDir(explicitDir) {
   return path.join(process.env.TEMP || process.env.TMP || os.tmpdir(), 'creator-publish-queue');
 }
 
-function httpRequest({ urlStr, method = 'GET', headers = {}, body = null, timeoutMs = 5000 }) {
+function connectViaProxy(proxy, targetHost, targetPort, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
-    const target = new URL(urlStr);
-    const proxy = resolveTailscaleProxyUrl();
-    const isHttps = target.protocol === 'https:';
-    let reqOpts;
-    let client = isHttps ? https : http;
+    const sock = net.connect({ host: proxy.hostname, port: Number(proxy.port) || 3130 });
+    let settled = false;
+    let buf = Buffer.alloc(0);
 
-    if (proxy && !isHttps) {
-      const hdrs = { Host: target.host, ...headers };
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      sock.removeAllListeners('data');
+      sock.destroy();
+      reject(err);
+    };
+
+    sock.setTimeout(timeoutMs, () => fail(new Error(`Proxy CONNECT timeout after ${timeoutMs}ms`)));
+    sock.on('error', fail);
+    sock.on('close', () => {
+      if (!settled) fail(new Error('Proxy closed before CONNECT completed'));
+    });
+
+    sock.on('connect', () => {
+      const hdrs = [`CONNECT ${targetHost}:${targetPort} HTTP/1.1`, `Host: ${targetHost}:${targetPort}`];
       if (proxy.username || proxy.password) {
         const auth = Buffer.from(
           `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`,
         ).toString('base64');
-        hdrs['Proxy-Authorization'] = `Basic ${auth}`;
+        hdrs.push(`Proxy-Authorization: Basic ${auth}`);
       }
-      client = http;
-      reqOpts = {
-        hostname: proxy.hostname,
-        port: Number(proxy.port) || 3130,
-        method,
-        path: urlStr,
-        headers: hdrs,
-        timeout: timeoutMs,
-      };
-    } else {
-      reqOpts = {
-        hostname: target.hostname,
-        port: Number(target.port) || (isHttps ? 443 : 80),
-        method,
-        path: `${target.pathname}${target.search}`,
-        headers,
-        timeout: timeoutMs,
-      };
-    }
+      sock.write(`${hdrs.join('\r\n')}\r\n\r\n`);
+    });
+
+    const onData = (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      const marker = buf.indexOf('\r\n\r\n');
+      if (marker === -1) {
+        if (buf.length > 16384) fail(new Error('Proxy CONNECT response header too large'));
+        return;
+      }
+      settled = true;
+      sock.setTimeout(0);
+      sock.removeListener('data', onData);
+      const head = buf.subarray(0, marker).toString('latin1');
+      const rest = buf.subarray(marker + 4);
+      const statusLine = head.split('\r\n', 1)[0] || '';
+      if (!/^HTTP\/\d\.\d\s+200\b/i.test(statusLine)) {
+        sock.destroy();
+        reject(new Error(`Proxy CONNECT failed: ${statusLine}`));
+        return;
+      }
+      if (rest.length > 0) sock.unshift(rest);
+      resolve(sock);
+    };
+
+    sock.on('data', onData);
+  });
+}
+
+async function httpRequest({ urlStr, method = 'GET', headers = {}, body = null, timeoutMs = 5000 }) {
+  const target = new URL(urlStr);
+  const proxy = resolveTailscaleProxyUrl();
+  const isHttps = target.protocol === 'https:';
+  const targetPort = Number(target.port) || (isHttps ? 443 : 80);
+  const client = isHttps ? https : http;
+
+  let tunnelSock = null;
+  if (proxy) {
+    tunnelSock = await connectViaProxy(proxy, target.hostname, targetPort, timeoutMs);
+  }
+
+  return new Promise((resolve, reject) => {
+    const reqHeaders = tunnelSock ? { Connection: 'close', ...headers } : headers;
+    const reqOpts = {
+      hostname: target.hostname,
+      port: targetPort,
+      method,
+      path: `${target.pathname}${target.search}`,
+      headers: reqHeaders,
+      timeout: timeoutMs,
+      ...(tunnelSock
+        ? {
+            agent: false,
+            createConnection: () => (isHttps ? tls.connect({ socket: tunnelSock, servername: target.hostname }) : tunnelSock),
+          }
+        : {}),
+    };
 
     const req = client.request(reqOpts, (res) => {
       const chunks = [];
       res.on('data', (d) => chunks.push(d));
       res.on('end', () => {
+        if (tunnelSock && !tunnelSock.destroyed) tunnelSock.destroy();
         const raw = Buffer.concat(chunks).toString('utf8');
         let parsed = null;
         try {
@@ -142,13 +195,16 @@ function httpRequest({ urlStr, method = 'GET', headers = {}, body = null, timeou
     req.on('timeout', () => {
       req.destroy(new Error(`HTTP timeout after ${timeoutMs}ms`));
     });
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (tunnelSock && !tunnelSock.destroyed) tunnelSock.destroy();
+      reject(err);
+    });
     if (body) req.write(body);
     req.end();
   });
 }
 
-async function checkBridgeHealth(cfg, timeoutMs = 2500) {
+async function checkBridgeHealth(cfg, timeoutMs = 6000) {
   if (!cfg.token) return { online: false, reason: 'missing LOCAL_BRIDGE_TOKEN' };
   try {
     const res = await httpRequest({
