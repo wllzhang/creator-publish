@@ -28,6 +28,7 @@ import { runEgoMjs, tmpJoin } from '../lib/ego_util.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_DRAFT = path.join(__dirname, 'api_draft.mjs');
 const MP_ORIGINAL_EGO = path.join(__dirname, 'mp_original_ego.mjs');
+const TAILSCALE_SSH_PROXY = path.join(__dirname, '..', 'lib', 'tailscale_ssh_proxy.mjs');
 const FALLBACK_SSH = '';
 
 function loadEnvFile(filePath) {
@@ -94,15 +95,38 @@ function mustOk(r, label) {
   return r;
 }
 
+function needsMuseTailscaleProxy() {
+  if (process.platform === 'win32') return false;
+  if (String(process.env.MUSE_TAILSCALE_PROXY || '').trim()) return true;
+  for (const k of ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy']) {
+    const raw = String(process.env[k] || '').trim();
+    if (!raw) continue;
+    try {
+      if (new URL(raw).hostname === 'hatch-egress-proxy') return true;
+    } catch { /* ignore */ }
+  }
+  return false;
+}
+
+function proxyCmdOpts() {
+  if (!needsMuseTailscaleProxy() || !fs.existsSync(TAILSCALE_SSH_PROXY)) return [];
+  const kh = path.join(os.homedir(), '.ssh', 'known_hosts');
+  return [
+    '-o', `ProxyCommand=${process.execPath} ${TAILSCALE_SSH_PROXY} %h %p`,
+    '-o', `UserKnownHostsFile=${kh}`,
+    '-o', 'StrictHostKeyChecking=accept-new',
+  ];
+}
+
 function sshBase(host, sshKey) {
-  const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15'];
+  const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', ...proxyCmdOpts()];
   if (sshKey) args.push('-i', sshKey);
   args.push(host);
   return args;
 }
 
 function scpBase(sshKey) {
-  const args = ['-C', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15'];
+  const args = ['-C', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', ...proxyCmdOpts()];
   if (sshKey) args.push('-i', sshKey);
   return args;
 }
