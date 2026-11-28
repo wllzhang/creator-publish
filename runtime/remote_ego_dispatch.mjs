@@ -148,40 +148,133 @@ function connectViaProxy(proxy, targetHost, targetPort, timeoutMs = 5000) {
   });
 }
 
+function decodeChunkedBody(buf) {
+  const parts = [];
+  let offset = 0;
+  while (offset < buf.length) {
+    const lineEnd = buf.indexOf('\r\n', offset);
+    if (lineEnd === -1) break;
+    const sizeRaw = buf.subarray(offset, lineEnd).toString('ascii').split(';', 1)[0].trim();
+    const size = parseInt(sizeRaw, 16);
+    if (!Number.isFinite(size) || size < 0) break;
+    offset = lineEnd + 2;
+    if (size === 0) break;
+    const end = Math.min(buf.length, offset + size);
+    parts.push(buf.subarray(offset, end));
+    offset = end + 2;
+  }
+  return Buffer.concat(parts);
+}
+
+function rawHttpOverTunnel(sock, { method, target, headers, body, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const chunks = [];
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      sock.destroy();
+      reject(new Error(`HTTP over tunnel timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      sock.destroy();
+      reject(err);
+    };
+
+    sock.on('error', fail);
+    sock.on('data', (d) => chunks.push(d));
+    sock.on('end', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      sock.destroy();
+      const full = Buffer.concat(chunks);
+      const sep = full.indexOf('\r\n\r\n');
+      if (sep === -1) {
+        reject(new Error(`Invalid HTTP response over tunnel (${full.length} bytes)`));
+        return;
+      }
+      const headText = full.subarray(0, sep).toString('latin1');
+      let bodyBuf = full.subarray(sep + 4);
+      const lines = headText.split('\r\n');
+      const statusMatch = /^HTTP\/\d\.\d\s+(\d{3})/.exec(lines[0] || '');
+      const status = statusMatch ? Number(statusMatch[1]) : 0;
+      const respHeaders = {};
+      for (const ln of lines.slice(1)) {
+        const idx = ln.indexOf(':');
+        if (idx > 0) respHeaders[ln.slice(0, idx).trim().toLowerCase()] = ln.slice(idx + 1).trim();
+      }
+      if ((respHeaders['transfer-encoding'] || '').toLowerCase().includes('chunked')) {
+        bodyBuf = decodeChunkedBody(bodyBuf);
+      } else if (respHeaders['content-length']) {
+        const cl = Number(respHeaders['content-length']);
+        if (Number.isFinite(cl) && cl >= 0 && bodyBuf.length >= cl) {
+          bodyBuf = bodyBuf.subarray(0, cl);
+        }
+      }
+      const raw = bodyBuf.toString('utf8');
+      let parsed = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = { raw };
+      }
+      resolve({ status, data: parsed });
+    });
+
+    const bodyBuf = body == null ? null : (Buffer.isBuffer(body) ? body : Buffer.from(body));
+    const headerLines = [`${method} ${target.pathname}${target.search} HTTP/1.1`, `Host: ${target.host}`, 'Connection: close'];
+    for (const [k, v] of Object.entries(headers || {})) {
+      if (/^(host|connection|content-length)$/i.test(k)) continue;
+      headerLines.push(`${k}: ${v}`);
+    }
+    if (bodyBuf !== null) {
+      headerLines.push(`Content-Length: ${bodyBuf.length}`);
+    }
+    sock.write(`${headerLines.join('\r\n')}\r\n\r\n`);
+    if (bodyBuf !== null && bodyBuf.length > 0) {
+      sock.write(bodyBuf);
+    }
+  });
+}
+
 async function httpRequest({ urlStr, method = 'GET', headers = {}, body = null, timeoutMs = 5000 }) {
   const target = new URL(urlStr);
   const proxy = resolveTailscaleProxyUrl();
   const isHttps = target.protocol === 'https:';
   const targetPort = Number(target.port) || (isHttps ? 443 : 80);
-  const client = isHttps ? https : http;
 
-  let tunnelSock = null;
   if (proxy) {
-    tunnelSock = await connectViaProxy(proxy, target.hostname, targetPort, timeoutMs);
+    const rawSock = await connectViaProxy(proxy, target.hostname, targetPort, timeoutMs);
+    let sock = rawSock;
+    if (isHttps) {
+      sock = await new Promise((resolve, reject) => {
+        const tlsSock = tls.connect({ socket: rawSock, servername: target.hostname }, () => resolve(tlsSock));
+        tlsSock.on('error', reject);
+      });
+    }
+    return rawHttpOverTunnel(sock, { method, target, headers, body, timeoutMs });
   }
 
+  const client = isHttps ? https : http;
   return new Promise((resolve, reject) => {
-    const reqHeaders = tunnelSock ? { Connection: 'close', ...headers } : headers;
     const reqOpts = {
       hostname: target.hostname,
       port: targetPort,
       method,
       path: `${target.pathname}${target.search}`,
-      headers: reqHeaders,
+      headers,
       timeout: timeoutMs,
-      ...(tunnelSock
-        ? {
-            agent: false,
-            createConnection: () => (isHttps ? tls.connect({ socket: tunnelSock, servername: target.hostname }) : tunnelSock),
-          }
-        : {}),
     };
 
     const req = client.request(reqOpts, (res) => {
       const chunks = [];
       res.on('data', (d) => chunks.push(d));
       res.on('end', () => {
-        if (tunnelSock && !tunnelSock.destroyed) tunnelSock.destroy();
         const raw = Buffer.concat(chunks).toString('utf8');
         let parsed = null;
         try {
@@ -195,10 +288,7 @@ async function httpRequest({ urlStr, method = 'GET', headers = {}, body = null, 
     req.on('timeout', () => {
       req.destroy(new Error(`HTTP timeout after ${timeoutMs}ms`));
     });
-    req.on('error', (err) => {
-      if (tunnelSock && !tunnelSock.destroyed) tunnelSock.destroy();
-      reject(err);
-    });
+    req.on('error', reject);
     if (body) req.write(body);
     req.end();
   });
