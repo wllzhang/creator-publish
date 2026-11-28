@@ -13,8 +13,16 @@ import {
   suppressNativeFileDialog,
 } from '../lib/ego_dom.mjs';
 
+function sanitizeYouTubeText(raw) {
+  return String(raw || '')
+    .replace(/->/g, '→')
+    .replace(/<-/g, '←')
+    .replace(/</g, '‹')
+    .replace(/>/g, '›');
+}
+
 function clampTitle(raw, maxLen = 100) {
-  const s = String(raw || '').trim();
+  const s = sanitizeYouTubeText(raw).trim();
   if (s.length <= maxLen) return s;
   let cut = s.slice(0, maxLen);
   const last = cut.charCodeAt(cut.length - 1);
@@ -23,11 +31,11 @@ function clampTitle(raw, maxLen = 100) {
 }
 
 function buildDescription(body, topics) {
-  const cleanBody = body ? String(body).trim() : '';
+  const cleanBody = body ? sanitizeYouTubeText(body).trim() : '';
   const lowerBody = cleanBody.toLowerCase();
   const hashtags = [];
   for (const t of topics) {
-    const cleanTag = String(t || '').replace(/^#/, '').replace(/\s+/g, '').trim();
+    const cleanTag = sanitizeYouTubeText(String(t || '').replace(/^#/, '').replace(/\s+/g, '')).trim();
     if (!cleanTag) continue;
     const hash = `#${cleanTag}`;
     if (!lowerBody.includes(hash.toLowerCase())) {
@@ -53,12 +61,18 @@ if (!fs.existsSync(videoPath.replace(/\//g, path.sep))) {
 }
 
 const title = clampTitle(rawTitle, 100);
+if (/[<>]/.test(rawTitle)) {
+  console.warn(`[yt] normalized disallowed < / > characters in title -> "${title}"`);
+}
 if (rawTitle.length > 100) {
   console.warn(`[yt] title truncated to <=100 chars (${title.length}/${rawTitle.length})`);
 }
 
 const topics = normalizeTopics(job.topics);
 const description = buildDescription(job.body, topics);
+if (job.body && /[<>]/.test(String(job.body))) {
+  console.warn('[yt] normalized disallowed < / > characters in description');
+}
 const coverPath = job.cover ? abs(job.cover) : null;
 const aiGenerated = job.aiGenerated === true;
 const shotDir = resolveShotDir(job);
@@ -855,8 +869,14 @@ async function waitForUploadAndDraftSave(page) {
         /upload complete|100%\s*(?:uploaded)?|已上传\s*100%|上传完毕|上传完成|上傳完畢|上傳完成|processing|正在处理|處理中|处理中|\bchecks\b|checking|正在检查|检查完毕|檢查中|檢查完畢|no issues found|未发现问题/i.test(
           statusTxt,
         );
-      const isSaving = /saving\.\.\.|正在保存|儲存中/i.test(headerTxt);
-      const savedAsDraft = /saved as draft|draft saved|已保存为草稿|已儲存為草稿/i.test(headerTxt);
+      const savedAsDraft =
+        /saved as (?:draft|private)|draft saved|已保存为草稿|已储存为草稿|已保存为私享|已存为私人/i.test(headerTxt);
+      const isSaving = !savedAsDraft && /saving\.\.\.|正在保存|儲存中/i.test(headerTxt);
+      const hasInvalidField = Boolean(
+        dlg.querySelector(
+          'ytcp-social-suggestions-textbox[invalid], #title-textarea[invalid], #description-textarea[invalid]',
+        ),
+      );
 
       return {
         hasDialog: true,
@@ -865,6 +885,7 @@ async function waitForUploadAndDraftSave(page) {
         uploadDone,
         isSaving,
         savedAsDraft,
+        hasInvalidField,
         headerTxt: headerTxt.slice(0, 120),
         progressTxt: statusTxt.slice(0, 140),
       };
@@ -882,6 +903,7 @@ async function waitForUploadAndDraftSave(page) {
       uploadDone: st.uploadDone,
       savedAsDraft: st.savedAsDraft,
       isSaving: st.isSaving,
+      hasInvalidField: st.hasInvalidField,
       progress: st.progressTxt,
     });
 
@@ -969,20 +991,29 @@ async function closeUploadDialogDraftOnly(page) {
   await humanMouseClick(page, closeBtn.x, closeBtn.y, { radius: 3, tag: 'yt' });
   await humanPause(1200, 2000, '关闭上传弹窗保存草稿', 'yt');
 
-  const stillOpen = await page.evaluate(() => {
-    const dlg = document.querySelector('ytcp-uploads-dialog');
-    if (!dlg) return false;
-    const closeEl =
-      dlg.querySelector('#close-button, #ytcp-uploads-dialog-close-button, button[aria-label="Close"]');
-    if (closeEl) {
-      closeEl.click();
-      return true;
-    }
-    return Boolean(document.querySelector('ytcp-uploads-dialog'));
-  });
-  if (stillOpen) await humanPause(1000, 1600);
+  const isDialogStillVisible = () =>
+    page.evaluate(() => {
+      const dlg = document.querySelector('ytcp-uploads-dialog');
+      if (!dlg) return false;
+      const st = getComputedStyle(dlg);
+      const r = dlg.getBoundingClientRect();
+      return st.display !== 'none' && st.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+    });
 
-  return page.evaluate(() => !document.querySelector('ytcp-uploads-dialog'));
+  for (let w = 0; w < 6; w++) {
+    if (!(await isDialogStillVisible())) return true;
+    if (w === 1) {
+      await page.evaluate(() => {
+        const dlg = document.querySelector('ytcp-uploads-dialog');
+        const closeEl =
+          dlg?.querySelector('#close-button, #ytcp-uploads-dialog-close-button, button[aria-label="Close"]');
+        closeEl?.shadowRoot?.querySelector('button')?.click?.();
+        closeEl?.click?.();
+      });
+    }
+    await humanPause(700, 1100);
+  }
+  return !(await isDialogStillVisible());
 }
 
 async function verifyDraftOnContentPage(page, studioInfo, expectedTitle) {
@@ -1013,11 +1044,24 @@ async function verifyDraftOnContentPage(page, studioInfo, expectedTitle) {
           return out;
         };
 
-        const rows = deepAll(document, 'ytcp-video-row, [role="row"]');
-        const rowTexts = rows.map((r) => (r.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
-        const matchingRow = rowTexts.find((txt) => txt.includes(full) || (prefix.length >= 8 && txt.includes(prefix)));
+        const rows = deepAll(document, 'ytcp-video-row');
+        const rowSummaries = rows
+          .map((r) => {
+            const titleEl =
+              r.querySelector('#video-title, a#video-title') ||
+              deepAll(r, '#video-title, a#video-title')[0] ||
+              null;
+            const titleTxt = (titleEl?.innerText || titleEl?.textContent || '').replace(/\s+/g, ' ').trim();
+            const fullTxt = (r.innerText || '').replace(/\s+/g, ' ').trim();
+            return { titleTxt, fullTxt, combined: `${titleTxt} ${fullTxt}`.trim() };
+          })
+          .filter((item) => item.combined.length > 0);
+        const matchingRow = rowSummaries.find(
+          (item) =>
+            item.combined.includes(full) || (prefix.length >= 8 && item.combined.includes(prefix)),
+        );
         const hasDraftStatus = matchingRow
-          ? /\bDraft\b|草稿/i.test(matchingRow)
+          ? /\bDraft\b|草稿/i.test(matchingRow.combined)
           : /\bDraft\b|草稿/i.test(document.body?.innerText || '');
 
         return {
@@ -1025,7 +1069,7 @@ async function verifyDraftOnContentPage(page, studioInfo, expectedTitle) {
           rowCount: rows.length,
           titleInList: Boolean(matchingRow) || (document.body?.innerText || '').includes(full),
           hasDraftStatus,
-          matchedSnippet: matchingRow ? matchingRow.slice(0, 160) : '',
+          matchedSnippet: matchingRow ? matchingRow.combined.slice(0, 160) : '',
         };
       },
       { full: needleFull, prefix: needlePrefix },

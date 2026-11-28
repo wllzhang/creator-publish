@@ -415,16 +415,27 @@ async function uploadAndDispatch(cfg, { jobId, platform, profileId, mode, upload
   if (start.status === 200) return start.data;
 
   const deadline = Date.now() + (timeoutSec + 30) * 1000;
+  let consecutivePollErrors = 0;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 2500));
-    const poll = await httpRequest({
-      urlStr: `${cfg.baseUrl}/jobs/${encodeURIComponent(jobId)}`,
-      method: 'GET',
-      headers: { Authorization: `Bearer ${cfg.token}`, Accept: 'application/json' },
-      timeoutMs: 10_000,
-    });
-    if (poll.status === 200 && poll.data?.status !== 'running' && poll.data?.status !== 'queued') {
-      return poll.data;
+    try {
+      const poll = await httpRequest({
+        urlStr: `${cfg.baseUrl}/jobs/${encodeURIComponent(jobId)}`,
+        method: 'GET',
+        headers: { Authorization: `Bearer ${cfg.token}`, Accept: 'application/json' },
+        timeoutMs: 10_000,
+      });
+      consecutivePollErrors = 0;
+      if (poll.status === 200 && poll.data?.status !== 'running' && poll.data?.status !== 'queued') {
+        return poll.data;
+      }
+    } catch (err) {
+      consecutivePollErrors += 1;
+      console.error(`[remote_ego_dispatch] poll warning (${consecutivePollErrors}/6) for ${jobId}: ${err.message}`);
+      if (consecutivePollErrors >= 6) {
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
   throw new Error(`Timed out waiting for bridge job ${jobId}`);
